@@ -1,9 +1,15 @@
 import { MotionState, FusionData } from '../utils/types';
+import {
+  TURN_THRESHOLD_RAD_S,
+  ACCEL_THRESHOLD_M_S2,
+} from '../utils/constants';
 
-const TURN_THRESHOLD = 0.05;
-const ACCEL_THRESHOLD = 0.5;
-
-type MotionStateType = 'Straight' | 'TurnLeft' | 'TurnRight' | 'Accelerating' | 'Braking';
+type MotionStateType =
+  | 'Straight'
+  | 'TurnLeft'
+  | 'TurnRight'
+  | 'Accelerating'
+  | 'Braking';
 
 class MotionAnalyzer {
   private state: MotionStateType = 'Straight';
@@ -12,18 +18,15 @@ class MotionAnalyzer {
   process(fusionData: FusionData, gyroZ: number): MotionState {
     const now = Date.now();
     const gyroAbs = Math.abs(gyroZ);
+    const accY = fusionData.worldAcceleration.y;
 
     let detectedState: MotionStateType = 'Straight';
 
-    if (gyroAbs > TURN_THRESHOLD) {
-      if (gyroZ > 0) {
-        detectedState = 'TurnLeft';
-      } else {
-        detectedState = 'TurnRight';
-      }
-    } else if (fusionData.worldAcceleration.y > ACCEL_THRESHOLD) {
+    if (gyroAbs > TURN_THRESHOLD_RAD_S) {
+      detectedState = gyroZ > 0 ? 'TurnLeft' : 'TurnRight';
+    } else if (accY > ACCEL_THRESHOLD_M_S2) {
       detectedState = 'Accelerating';
-    } else if (fusionData.worldAcceleration.y < -ACCEL_THRESHOLD) {
+    } else if (accY < -ACCEL_THRESHOLD_M_S2) {
       detectedState = 'Braking';
     }
 
@@ -32,7 +35,7 @@ class MotionAnalyzer {
       this.stateStartTime = now;
     }
 
-    const intensity = Math.min(1, gyroAbs / 1.0);
+    const intensity = Math.min(1, gyroAbs / Math.max(TURN_THRESHOLD_RAD_S * 3, 0.001));
 
     return {
       state: detectedState,
@@ -43,6 +46,10 @@ class MotionAnalyzer {
 
   getCurrentState(): MotionStateType {
     return this.state;
+  }
+
+  getStateDurationMs(): number {
+    return Date.now() - this.stateStartTime;
   }
 
   reset(): void {

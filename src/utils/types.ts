@@ -28,6 +28,7 @@ export interface FusionData {
   rotationMatrix: number[];
   eulerAngles: { yaw: number; pitch: number; roll: number };
   worldAcceleration: Vector3;
+  filteredGyroZ: number;
 }
 
 export interface MotionData {

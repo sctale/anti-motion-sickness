@@ -1,17 +1,30 @@
 import { SensorData, FusionData, Vector3 } from '../utils/types';
 import { rotationVectorToMatrix, calculateYawPitchRoll } from '../utils/coordinate';
-import { createVector3EMAFilter, updateVector3EMAFilter } from '../utils/filter';
-
-const EMA_ALPHA = 0.15;
+import {
+  createEMAFilter,
+  createVector3EMAFilter,
+  updateEMAFilter,
+  updateVector3EMAFilter,
+} from '../utils/filter';
+import { EMA_ALPHA } from '../utils/constants';
 
 class SensorFusion {
   private rotationMatrix: number[] = [1, 0, 0, 0, 1, 0, 0, 0, 1];
   private accelFilter = createVector3EMAFilter(EMA_ALPHA);
-  private gyroFilter = createVector3EMAFilter(EMA_ALPHA);
+  private gyroFilter = createEMAFilter(EMA_ALPHA);
   private isFirstData = true;
 
   process(data: SensorData): FusionData {
-    this.rotationMatrix = rotationVectorToMatrix(data.rotationVector);
+    const hasRotationVector =
+      data.rotationVector.length >= 4 &&
+      (data.rotationVector[0] !== 0 ||
+        data.rotationVector[1] !== 0 ||
+        data.rotationVector[2] !== 0 ||
+        data.rotationVector[3] !== 0);
+
+    if (hasRotationVector) {
+      this.rotationMatrix = rotationVectorToMatrix(data.rotationVector);
+    }
 
     const eulerAngles = calculateYawPitchRoll(this.rotationMatrix);
 
@@ -19,13 +32,13 @@ class SensorFusion {
     const worldAccel = this.transformToWorld(rawAccel);
     const filteredAccel = updateVector3EMAFilter(this.accelFilter, worldAccel);
 
-    const gyroZ = data.gyroscope.z;
-    this.gyroFilter.z.value = EMA_ALPHA * gyroZ + (1 - EMA_ALPHA) * this.gyroFilter.z.value;
+    const filteredGyroZ = updateEMAFilter(this.gyroFilter, data.gyroscope.z);
 
     return {
       rotationMatrix: [...this.rotationMatrix],
       eulerAngles,
       worldAcceleration: filteredAccel,
+      filteredGyroZ,
     };
   }
 
@@ -51,7 +64,7 @@ class SensorFusion {
   reset(): void {
     this.rotationMatrix = [1, 0, 0, 0, 1, 0, 0, 0, 1];
     this.accelFilter = createVector3EMAFilter(EMA_ALPHA);
-    this.gyroFilter = createVector3EMAFilter(EMA_ALPHA);
+    this.gyroFilter = createEMAFilter(EMA_ALPHA);
     this.isFirstData = true;
   }
 }

@@ -1,14 +1,12 @@
 import { Accelerometer, Gyroscope } from 'expo-sensors';
 import { SensorData } from '../utils/types';
-
-const SENSOR_UPDATE_INTERVAL = 16;
+import { SENSOR_UPDATE_INTERVAL_MS } from '../utils/constants';
 
 export type SensorCallback = (data: SensorData) => void;
 
 class SensorService {
   private isRunning = false;
   private callbacks: Set<SensorCallback> = new Set();
-  private rotationVectorData: number[] = [0, 0, 0];
   private accelerometerData = { x: 0, y: 0, z: 0 };
   private gyroscopeData = { x: 0, y: 0, z: 0 };
   private lastTimestamp = 0;
@@ -17,12 +15,11 @@ class SensorService {
     if (this.isRunning) return;
     this.isRunning = true;
 
-    Accelerometer.setUpdateInterval(SENSOR_UPDATE_INTERVAL);
-    Gyroscope.setUpdateInterval(SENSOR_UPDATE_INTERVAL);
+    Accelerometer.setUpdateInterval(SENSOR_UPDATE_INTERVAL_MS);
+    Gyroscope.setUpdateInterval(SENSOR_UPDATE_INTERVAL_MS);
 
     Accelerometer.addListener((data) => {
       this.accelerometerData = { x: data.x, y: data.y, z: data.z };
-      this.rotationVectorData = [data.x, data.y, data.z];
       this.emit();
     });
 
@@ -48,11 +45,11 @@ class SensorService {
 
   private emit(): void {
     const timestamp = Date.now();
-    if (timestamp - this.lastTimestamp < SENSOR_UPDATE_INTERVAL) return;
+    if (timestamp - this.lastTimestamp < SENSOR_UPDATE_INTERVAL_MS) return;
     this.lastTimestamp = timestamp;
 
     const data: SensorData = {
-      rotationVector: [...this.rotationVectorData],
+      rotationVector: [0, 0, 0, 0],
       accelerometer: { ...this.accelerometerData },
       gyroscope: { ...this.gyroscopeData },
       timestamp,
@@ -63,7 +60,7 @@ class SensorService {
 
   getCurrentData(): SensorData {
     return {
-      rotationVector: [...this.rotationVectorData],
+      rotationVector: [0, 0, 0, 0],
       accelerometer: { ...this.accelerometerData },
       gyroscope: { ...this.gyroscopeData },
       timestamp: Date.now(),
