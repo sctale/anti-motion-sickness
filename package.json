@@ -1,6 +1,6 @@
 {
   "name": "anti-car-sickness-rn",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "main": "index.ts",
   "dependencies": {
     "expo": "~56.0.8",
@@ -21,7 +21,10 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "prebuild:android": "expo prebuild --platform android --no-install",
+    "build:android": "cd android && gradlew assembleRelease",
+    "lint:tsc": "tsc --noEmit"
   },
   "private": true
 }
