@@ -3,6 +3,7 @@ node_modules/
 npm-debug.log
 yarn-error.log
 yarn.lock
+package-lock.json
 
 # Expo
 .expo/
@@ -43,6 +44,7 @@ logs/
 
 # Build outputs
 build/
+.gradle-cache/
 *.tsbuildinfo
 
 # OS
@@ -62,3 +64,23 @@ avd_*.png
 app_*.png
 screencap*.png
 start_avd.bat
+*.jpg
+*.jpeg
+Screenshot_*.jpg
+
+# Reference and dev files (not part of project)
+anti-car-sickness-refer/
+encode-image.ps1
+run-mmx.bat
+
+# AGENTS files (only keep root AGENTS.md)
+AGENTS - 副本.md
+AGENTS*.md
+!AGENTS.md
+
+# Claude config
+.claude/
+CLAUDE.md
+
+# Scripts (project-specific)
+release_notes.md
