@@ -1,2 +1,0 @@
-@echo off
-node "C:\Users\HAOHAO\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\node\node_modules\npm\bin\npm-cli.js" exec -- mmx vision describe --image "d:\V-Coding\anti-car-sickness-rn\Screenshot_20260531_134259_anti-car-sickness-rn.jpg" --prompt "请描述这张截图的内容，特别是任何错误信息"
