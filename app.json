@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.anonymous.anticarsicknessrn",
-      "versionCode": 200,
+      "versionCode": 201,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
