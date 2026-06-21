@@ -69,7 +69,11 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar hidden />
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="#0F172A"
+        translucent={false}
+      />
 
       <View style={styles.header}>
         <TouchableOpacity onPress={handleExit} style={styles.backButton}>

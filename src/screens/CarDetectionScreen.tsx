@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Switch,
   SafeAreaView,
+  StatusBar,
   Platform,
 } from 'react-native';
 import { useActivityRecognition, ActivityType } from '../hooks/useActivityRecognition';
