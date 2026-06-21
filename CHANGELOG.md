@@ -1,5 +1,20 @@
 # 更新日志 (Changelog)
 
+## [0.2.1] - 2026-06-21
+
+### 🔄 流程变更
+
+- **真机测试策略**：放弃 AVD 模拟器测试，改为「开发者本地构建 → GitHub Release → 用户真机测试」
+- **`release.ps1` 一键发布**：自动完成版本号 bump、prebuild、图标替换、APK 构建、版本验证、APK 复制、git tag、gh release upload 全流程
+- **`generate_icons.ps1` / `replace_icons.ps1` 路径修复**：从硬编码 `D:\V-Coding\anti-car-sickness-rn` 改为 `$PSScriptRoot`，可任意位置调用
+
+### 📜 文档同步
+
+- [AGENTS.md](./AGENTS.md) 重写：删除 AVD 相关章节，新增「一键发布流程」「真机测试步骤」
+- [README.md](./README.md) 同步：移除 AVD 描述，新增 `release.ps1` 入口
+
+---
+
 ## [0.2.0] - 2026-06-21
 
 ### 🐛 关键 Bug 修复

@@ -77,16 +77,22 @@ android/app/src/main/java/com/anonymous/anticarsicknessrn/
 ```
 src/
 ├── hooks/
-│   └── useOverlayService.ts    # 控制原生服务的 Hook
+│   ├── useOverlayService.ts     # 控制原生服务
+│   ├── useVehicleMotion.ts      # 运动数据 Hook
+│   ├── useActivityRecognition.ts # 乘车检测
+│   ├── useAntiSickness.ts       # 练习模式（shake/swipe/twist/auto）
+│   ├── useVibrationService.ts   # 震动服务
+│   └── useMotionDetection.ts    # 动作识别
 ├── screens/
-│   └── VehicleMotionScreen.tsx # 主界面
-├── services/
-│   ├── SensorService.ts        # 传感器监听（JS 端备用）
-│   ├── SensorFusion.ts         # 传感器融合（JS 端备用）
-│   ├── MotionAnalyzer.ts       # 运动分析（JS 端备用）
-│   └── PredictionEngine.ts     # 预测引擎（JS 端备用）
-├── components/                 # UI 组件
-└── utils/                      # 工具函数
+│   ├── VehicleMotionScreen.tsx  # 主功能屏
+│   └── CarDetectionScreen.tsx   # 乘车检测屏
+├── components/                  # UI 组件
+├── services/                    # JS 端后备实现
+└── utils/
+    ├── constants.ts             # 统一常量 ⭐
+    ├── types.ts                 # 类型定义
+    ├── coordinate.ts            # 坐标变换
+    └── filter.ts                # EMA / Kalman
 ```
 
 **注意**：实际运动处理在 **原生 Kotlin** 层（`OverlayService.kt` 等），JS 层只是简单的服务控制。
@@ -105,6 +111,8 @@ src/
 | 最大偏移 | 60dp | 圆点最大移动距离 |
 | 采样率 | SENSOR_DELAY_GAME | ~50-100Hz |
 | 窗口类型 | TYPE_APPLICATION_OVERLAY | Android 系统级悬浮窗 |
+
+> 阈值常量定义于 [`src/utils/constants.ts`](./src/utils/constants.ts)，单点修改即可全局生效。
 
 ### AndroidManifest 关键配置
 
@@ -129,57 +137,138 @@ src/
 </service>
 ```
 
+### Android 16 适配要点
+
+| 规范项 | 处理方式 |
+|--------|----------|
+| 预测性返回手势 | `app.json` 中 `predictiveBackGestureEnabled: true`，原生 `enableOnBackInvokedCallback="true"` |
+| 边缘到边缘 | `app.json` 中 `edgeToEdgeEnabled: true`，原生 `WindowCompat.setDecorFitsSystemWindows(window, false)` |
+| 前台服务类型 | `foregroundServiceType="specialUse"` + `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` |
+| 16KB 页面对齐 | Gradle/CMake 配置 `max-page-size=16384`（生成项目后需手动添加） |
+| 状态栏 | `androidStatusBar` 显式声明 `barStyle` 与 `backgroundColor` |
+
 ---
 
-## Android 构建流程（标准流程）
+## 🚀 一键发布流程（推荐）
 
-每次修改代码后，按以下步骤构建 APK：
+**项目采用真机测试策略**：本地构建 APK → 上传 GitHub Release → 用户手机真机测试。不再使用 AVD 模拟器。
 
-### 1. Prebuild（生成原生代码）
+### 1. 一键发布到 GitHub
 
 ```powershell
-cd d:\V-Coding\anti-car-sickness-rn
+# 完整流程：升级 patch 版本号 + prebuild + 构建 + 上传
+.\release.ps1
+
+# 升级次版本号
+.\release.ps1 -BumpType minor
+
+# 升级主版本号
+.\release.ps1 -BumpType major
+
+# 不升级版本号
+.\release.ps1 -BumpType none
+
+# 创建 draft release
+.\release.ps1 -Draft
+
+# 只上传已构建的 APK（跳过 prebuild + 构建）
+.\release.ps1 -UploadOnly
+
+# 自定义 release notes
+.\release.ps1 -NotesFile .\custom-notes.md
+```
+
+**release.ps1 自动执行的流程**：
+1. 检查 git 状态
+2. 升级 `app.json` / `package.json` 版本号（默认 patch）
+3. 在 `CHANGELOG.md` 添加新版本占位条目
+4. 提交版本号变更并 push
+5. 执行 `npx expo prebuild --platform android --no-install`
+6. 执行 `replace_icons.ps1` 替换图标
+7. 执行 `gradlew assembleRelease` 构建 APK
+8. 用 `aapt dump badging` 验证 APK 版本号
+9. 复制 APK 到根目录 `anti-car-sickness-rn.apk`
+10. 创建/更新 git tag
+11. 用 `gh release upload` 上传 APK 到 GitHub Release
+12. 输出 Release 下载链接
+
+### 2. 真机测试步骤（用户）
+
+1. 收到 Release 链接后访问：https://github.com/sctale/anti-motion-sickness/releases
+2. 下载最新版本的 APK（`anti-motion-sickness-vX.Y.Z.apk`）
+3. **首次安装**：需要允许"安装来自未知来源的应用"
+4. 启动 App → 看到 Home 屏（两个入口：Vehicle Motion / 乘车检测）
+5. 点击"启动 Vehicle Motion"
+6. **首次启动**：授予"显示在其他应用上层"权限
+7. 返回 App → 点击"▶ 启动"
+8. **观察**：圆点出现在屏幕上下边缘
+9. **摇晃手机**：圆点随运动方向移动
+10. **切换到微信/浏览器**：圆点仍然显示，覆盖在其他 App 上
+11. 测试完毕后通过 GitHub Issue 反馈问题
+
+### 3. 用户反馈 → 修复 → 重新发布
+
+1. 用户在 GitHub Issue 报告问题
+2. 开发者修复代码 → 提交 → push
+3. 运行 `.\release.ps1`（自动 bump 版本号 + 构建 + 上传）
+4. 用户下载新版本 APK 真机测试
+
+---
+
+## 手动构建流程（备选）
+
+如果 `release.ps1` 失败或需要更细的控制，可以手动执行：
+
+### 1. Prebuild
+
+```powershell
 npx expo prebuild --platform android --no-install
 ```
 
-- 首次构建或修改了 Config Plugin 时必须执行
-- 如果 `android/` 目录被锁定（EBUSY），先关闭占用进程再重试
-- **不要使用 `--clean`**，除非明确需要完全重建
+- 首次或修改了 Config Plugin 时必须执行
+- **不要使用 `--clean`**，除非需要完全重建
 - 修改 `app.json` 或 `package.json` 后必须 prebuild 一次
 
-**⚠️ 警告**：prebuild 会重新生成 `android/app/src/main/res/mipmap-*/ic_launcher*.webp` 为 Expo 默认图标。如果已经用 `replace_icons.ps1` 替换过图标，需要重新替换。
+**⚠️ 警告**：prebuild 会重置 `android/app/src/main/res/mipmap-*/ic_launcher*.webp` 为 Expo 默认图标，需要运行 `replace_icons.ps1` 恢复自定义图标。
 
-### 2. 替换图标（如已自定义）
+### 2. 替换图标
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File replace_icons.ps1
 ```
 
-将 `assets/icon.png`、`android-icon-foreground.png`、`android-icon-background.png`、`android-icon-monochrome.png` 转换为各 DPI 的 WEBP 文件并覆盖默认图标。
-
 ### 3. 构建 Release APK
 
 ```powershell
-cd d:\V-Coding\anti-car-sickness-rn\android
+cd android
 .\gradlew assembleRelease
 ```
 
-- **仅 JS 改动**（上次 build 后只改了 src/）：约 25 秒
-- **Prebuild 增量后**（改了 app.json）：约 30-60 秒
-- **Prebuild `--clean` 后**：约 3-4 分钟（native 重编译）
+- **仅 JS 改动**：约 25 秒
+- **Prebuild 增量后**：约 30-60 秒
+- **Prebuild `--clean` 后**：约 3-4 分钟
 - APK 输出路径：`android\app\build\outputs\apk\release\app-release.apk`
-- 复制到根目录：`d:\V-Coding\anti-car-sickness-rn\anti-car-sickness-rn.apk`
 
-### 4. 验证构建结果（强制步骤）
+### 4. 验证版本号
 
 ```powershell
-# 验证版本号
-& "C:\Users\HAOHAO\AppData\Local\Android\Sdk\build-tools\34.0.0\aapt.exe" dump badging "d:\V-Coding\anti-car-sickness-rn\anti-car-sickness-rn.apk" | Select-String "package"
+& "$env:LOCALAPPDATA\Android\Sdk\build-tools\34.0.0\aapt.exe" dump badging "android\app\build\outputs\apk\release\app-release.apk" | Select-String "package"
 ```
 
 **必须确认**：
 - `versionName` 与 `app.json.expo.version` 一致
-- `versionCode` 是 `major*10000 + minor*100 + patch`（0.1.0 → 100）
+- `versionCode` 是 `major*10000 + minor*100 + patch`
+
+### 5. 上传到 GitHub
+
+```powershell
+$env:APK = "android\app\build\outputs\apk\release\app-release.apk"
+$env:VER = "v0.2.0"
+Copy-Item $env:APK ".\anti-car-sickness-rn.apk" -Force
+git tag -a $env:VER -m $env:VER
+git push origin main; git push origin $env:VER
+& "C:\Program Files\GitHub CLI\gh.exe" release upload $env:VER ".\anti-car-sickness-rn.apk#anti-motion-sickness-$env:VER.apk" --repo sctale/anti-motion-sickness --clobber
+```
 
 ---
 
@@ -187,100 +276,35 @@ cd d:\V-Coding\anti-car-sickness-rn\android
 
 **单一数据源：`app.json.expo.version`**
 
-- Expo prebuild 会自动从 `app.json.expo.version` 读取版本号
-- 如果 prebuild 后版本号不对，需要手动修改 `android/app/build.gradle`：
+- `release.ps1` 自动从 `app.json.expo.version` 同步到 `package.json` 和 `android.versionCode`
+- 手动构建时，如果 prebuild 后版本号不对，需要修改 `android/app/build.gradle`：
   ```gradle
-  versionCode 100
-  versionName "0.1.0"
+  versionCode 200
+  versionName "0.2.0"
   ```
 
 ### 版本号规则
 
-- 新功能 → 次版本号 +1（0.1.0 → 0.2.0）
-- Bug 修复 → 修订号 +1（0.1.0 → 0.1.1）
+- 新功能 → 次版本号 +1（0.2.0 → 0.3.0）
+- Bug 修复 → 修订号 +1（0.2.0 → 0.2.1）
 - 破坏性更新 → 主版本号 +1（0.x.x → 1.0.0）
 - versionCode 派生：`major*10000 + minor*100 + patch`
 
 ---
 
-## 版本发布流程
+## 工具脚本
 
-### 1. 发布前检查清单
+| 脚本 | 作用 |
+|------|------|
+| `release.ps1` | 一键发布到 GitHub Release（推荐入口） |
+| `generate_icons.ps1` | 重新生成 `assets/*.png` 图标源文件 |
+| `replace_icons.ps1` | 把 `assets/*.png` 替换到 `android/app/src/main/res/mipmap-*/` |
 
-- [ ] `app.json` → `expo.version` 已更新
-- [ ] `package.json` → `version` 与 `app.json` 一致
-- [ ] `app.json` → `android.versionCode` 与派生值一致
-- [ ] `android/app/build.gradle` → `versionCode`/`versionName` 正确
-- [ ] `README.md` → "版本" 信息已同步
-- [ ] `CHANGELOG.md` → 顶部已添加新版本记录
-- [ ] 跑了 `npx expo prebuild --platform android --no-install`
-- [ ] 跑了 `powershell -ExecutionPolicy Bypass -File replace_icons.ps1`
-- [ ] `.\gradlew assembleRelease` 成功
-- [ ] aapt dump badging 验证版本号
-
-### 2. Git 提交
-
-```powershell
-cd d:\V-Coding\anti-car-sickness-rn
-git add <相关文件>
-git commit -m "feat/fix/docs: 中文描述"
-```
-
-- commit message 格式：`feat:` / `fix:` / `docs:` + 中文描述
-- **不要 `git add .`**，逐个添加文件避免误提交
-- PowerShell 不支持 HEREDOC，commit message 写一行
-
-### 3. 推送到 GitHub
-
-```powershell
-git push origin main
-```
-
-`android/` 目录在 `.gitignore` 中被排除（`/android`），因此 build.gradle 修改不会进版本控制。
-
-### 4. 创建 GitHub Release（推荐 gh CLI）
-
-```powershell
-# 一次性登录（永久有效）
-& "C:\Program Files\GitHub CLI\gh.exe" auth login --hostname github.com --git-protocol https --web
-
-# 创建 release
-& "C:\Program Files\GitHub CLI\gh.exe" release create v<版本号> `
-  "d:\V-Coding\anti-car-sickness-rn\anti-car-sickness-rn.apk#anti-motion-sickness-v<版本号>.apk" `
-  --repo sctale/anti-motion-sickness `
-  --title "v<版本号>" `
-  --notes-file release_notes.md
-```
-
-- 使用 `& "C:\Program Files\GitHub CLI\gh.exe"` 而非 `gh`（系统 PATH 中的 gh 可能指向错误脚本）
-- APK **必须**上传到 Release（用 `#别名` 语法指定下载显示名）
-- 使用 `--notes-file` 而非 `--notes` 避免 PowerShell emoji glob 问题
-
-### 5. 覆盖已发布 release 的 APK
-
-```powershell
-& "C:\Program Files\GitHub CLI\gh.exe" release upload v<版本号> `
-  d:\V-Coding\anti-car-sickness-rn\anti-car-sickness-rn.apk#anti-motion-sickness-v<版本号>.apk `
-  --repo sctale/anti-motion-sickness --clobber
-```
-
-### 6. 删除 release
-
-```powershell
-& "C:\Program Files\GitHub CLI\gh.exe" release delete v<版本号> --repo sctale/anti-motion-sickness --cleanup-tag --yes
-```
-
-### 7. GitHub MCP 工具（替代 git push）
-
-如果不想用 git CLI，可以用 MCP 工具 `mcp_GitHub`：
-- `create_or_update_file` - 创建/更新文件
-- `create_repository` - 创建仓库
-- `push_files` - 批量推送
-- `create_branch` - 创建分支
+> 所有脚本都使用 `$PSScriptRoot` 解析路径，可在任意位置调用。
 
 ---
 
-## GitHub 工具链（按推荐度排序）
+## GitHub 工具链
 
 ### 1. gh CLI OAuth 登录（推荐，0 token）
 
@@ -289,10 +313,9 @@ git push origin main
 ```
 
 - 浏览器 OAuth 一次，本机 `gh` 永久有权限
-- 之后 `gh release create` / `gh release upload` / `git push` 都不需要 token
 - 撤销：`gh auth logout`
 
-### 2. GitHub MCP 工具（推荐用于文件操作）
+### 2. GitHub MCP 工具
 
 适合 `create_or_update_file`、`push_files` 等细粒度操作。
 
@@ -314,12 +337,11 @@ $env:GH_TOKEN = "ghp_xxx"
 - 原因：Gradle daemon 或其他进程占用 `android/` 目录
 - 解决：关闭占用进程，或直接运行 `npx expo prebuild --platform android`
 
-### 圆点不移动
+### 圆点不移动（真机）
 
-- **AVD 模拟器**：陀螺仪支持有限，建议真机测试
-- **真机未动**：检查是否授予了"显示在其他应用上层"权限
 - **传感器数据为空**：检查 `TYPE_ROTATION_VECTOR` 传感器是否存在
 - **启动后立即停止**：检查 Foreground Service 通知是否被关闭
+- **真机没动**：手动摇晃手机测试
 
 ### 圆点不显示在其他 App 上方
 
@@ -334,93 +356,70 @@ $env:GH_TOKEN = "ghp_xxx"
 
 ### APK 版本号不对
 
-- 原因：忘了用 `app.json.expo.version` 自动同步，或者 build.gradle 没改
-- 解决：改 `app.json.expo.version` → 修改 `android/app/build.gradle` → 重新 prebuild + assembleRelease → 验证 `aapt dump badging` → 用 `gh release upload --clobber` 覆盖
+- 原因：忘了用 `app.json.expo.version` 自动同步
+- 解决：改 `app.json.expo.version` → prebuild → 验证 `aapt dump badging` → 用 `gh release upload --clobber` 覆盖
 
 ### App 启动崩溃
 
 - 检查 `MainApplication.kt` 中 `SoLoader.init(this, false)` 是否正确
 - 检查 `AndroidManifest.xml` 是否声明了所有权限和服务
 - 检查 `OverlayPackage` 是否在 `MainApplication` 中注册
-- 用 `adb logcat` 查看具体 stacktrace
+- 真机可以用 `adb logcat` 抓 stacktrace（开发机调试用）
 
 ### PowerShell 不支持 HEREDOC
 
 - 不要使用 `$(cat <<'EOF' ... EOF)` 语法
 - 使用简单的单行 commit message，或用 `-m` 参数直接写
 
-### gh release notes 含 emoji 导致 PowerShell glob 失败
-
-- 现象：`gh release create ... --notes "..."` 里出现 emoji 字符时报 `no matches found`
-- 原因：PowerShell 把 emoji 解释为 glob 模式
-- 解决：把 notes 写入文件，用 `--notes-file <path>` 代替 `--notes`
-
 ### gh CLI 路径
 
 - 正确路径：`C:\Program Files\GitHub CLI\gh.exe`
 - 系统 PATH 中的 `gh` 可能指向错误的脚本
 
-### git push 失败 - remote 已有内容
+### release.ps1 推送失败
 
-- 现象：`! [rejected] main -> main (fetch first)`
-- 解决：使用 `git push -u origin main --force`（首次推送时强制覆盖）
-
-### PowerShell 执行策略阻断 npx / npm
-
-- 现象：`PSSecurityException` 或脚本无法运行
-- 解决：用 `powershell -ExecutionPolicy Bypass -Command "..."` 包装
+- 检查 git 是否有未解决的冲突
+- 检查 `gh auth status` 是否已认证
+- 检查 `versionCode` 是否与 `versionName` 一致
 
 ---
 
-## 快速参考（最常用命令速查）
+## 快速参考
 
 ```powershell
-# ===== 日常开发 =====
-# 启动 dev server
-npx expo start
+# ===== 推荐：完整发布 =====
+.\release.ps1                              # patch 升级
+.\release.ps1 -BumpType minor             # minor 升级
+.\release.ps1 -BumpType none -UploadOnly  # 只重传当前版本
 
-# ===== Prebuild =====
+# ===== 手动分步 =====
 npx expo prebuild --platform android --no-install
-
-# ===== 图标替换 =====
 powershell -ExecutionPolicy Bypass -File replace_icons.ps1
-
-# ===== Build =====
 cd android; .\gradlew assembleRelease
+& "$env:LOCALAPPDATA\Android\Sdk\build-tools\34.0.0\aapt.exe" dump badging android\app\build\outputs\apk\release\app-release.apk | Select-String "package"
 
-# 复制 APK 到根目录
-Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "anti-car-sickness-rn.apk" -Force
-
-# 验证版本号
-& "C:\Users\HAOHAO\AppData\Local\Android\Sdk\build-tools\34.0.0\aapt.exe" dump badging android\app\build\outputs\apk\release\app-release.apk | Select-String "package"
-
-# ===== Git =====
+# ===== Git 常用 =====
 git add <files>
 git commit -m "feat/fix/docs: 中文描述"
 git push origin main
+git tag -a v0.2.1 -m v0.2.1
+git push origin v0.2.1
 
-# ===== GitHub Release =====
-# 一次性登录（永久有效）
-& "C:\Program Files\GitHub CLI\gh.exe" auth login --hostname github.com --git-protocol https --web
-
+# ===== gh Release =====
 # 创建 release
-& "C:\Program Files\GitHub CLI\gh.exe" release create v<版本号> "anti-car-sickness-rn.apk#anti-motion-sickness-v<版本号>.apk" --repo sctale/anti-motion-sickness --title "v<版本号>" --notes-file release_notes.md
+& "C:\Program Files\GitHub CLI\gh.exe" release create v0.2.1 `
+  ".\anti-car-sickness-rn.apk#anti-motion-sickness-v0.2.1.apk" `
+  --repo sctale/anti-motion-sickness `
+  --title "v0.2.1" `
+  --notes-file release_notes.md
 
-# 覆盖已发布 release 的 APK
-& "C:\Program Files\GitHub CLI\gh.exe" release upload v<版本号> anti-car-sickness-rn.apk#anti-motion-sickness-v<版本号>.apk --repo sctale/anti-motion-sickness --clobber
+# 覆盖 release APK
+& "C:\Program Files\GitHub CLI\gh.exe" release upload v0.2.1 `
+  .\anti-car-sickness-rn.apk#anti-motion-sickness-v0.2.1.apk `
+  --repo sctale/anti-motion-sickness --clobber
 
 # 删除 release
-& "C:\Program Files\GitHub CLI\gh.exe" release delete v<版本号> --repo sctale/anti-motion-sickness --cleanup-tag --yes
-
-# ===== AVD 测试 =====
-# 启动前台 AVD
-& "$env:LOCALAPPDATA\Android\Sdk\emulator\emulator.exe" -avd test-android-36 -no-audio -no-snapshot-load -gpu swiftshader_indirect
-
-# 安装 APK
-& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" install -r anti-car-sickness-rn.apk
-
-# 启动 App
-& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" shell am start -n com.anonymous.anticarsicknessrn/.MainActivity
+& "C:\Program Files\GitHub CLI\gh.exe" release delete v0.2.1 --repo sctale/anti-motion-sickness --cleanup-tag --yes
 ```
 
 ---
@@ -433,13 +432,16 @@ git push origin main
 AGENTS.md                  # 本文档
 README.md                  # 项目说明
 CHANGELOG.md               # 版本历史
-package.json               # npm 依赖（version: 0.1.0）
-app.json                   # Expo 配置（expo.version: 0.1.0）
+package.json               # npm 依赖
+app.json                   # Expo 配置
 tsconfig.json              # TypeScript 配置
 index.ts                   # 入口
 App.tsx                    # 主组件
 src/                       # 所有 RN 代码
 assets/                    # 图标资源
+release.ps1                # 一键发布脚本
+generate_icons.ps1         # 图标生成
+replace_icons.ps1          # 图标替换
 LICENSE                    # MIT
 ```
 
@@ -462,7 +464,6 @@ anti-car-sickness-refer/   # 参考资料（不发布）
 encode-image.ps1           # 旧脚本
 run-mmx.bat                # 旧批处理
 release_notes.md           # 发布说明
-*.jpg, *.jpeg              # 截图
 ```
 
 ---
@@ -471,3 +472,4 @@ release_notes.md           # 发布说明
 
 - GitHub: https://github.com/sctale
 - 项目仓库: https://github.com/sctale/anti-motion-sickness
+- Issue: https://github.com/sctale/anti-motion-sickness/issues

@@ -71,35 +71,31 @@ TYPE_APPLICATION_OVERLAY 窗口
 
 ## 🚀 快速开始
 
-### 安装 APK
+### 真机测试（推荐流程）
 
-前往 [Releases](https://github.com/sctale/anti-motion-sickness/releases) 下载最新版本的 APK。
+> **项目采用真机测试策略**：开发者本地构建 → 上传 GitHub Release → 用户手机真机测试。
 
-### 真机测试步骤
+1. 访问 [Releases](https://github.com/sctale/anti-motion-sickness/releases) 下载最新版本的 APK
+2. 在 Android 设备上安装（Android 6.0+，推荐 Android 14+）
+3. **首次安装**：允许"安装来自未知来源的应用"
+4. 启动 App → 选择"启动 Vehicle Motion"或"启动乘车检测"
+5. **首次启动**：授予"显示在其他应用上层"权限
+6. 返回 App → 点击"▶ 启动"
+7. **观察**：圆点出现在屏幕上下边缘
+8. **摇晃手机**：圆点随运动方向移动
+9. **切换到微信/浏览器**：圆点仍然显示，覆盖在其他 App 上
 
-1. 安装 APK 到 Android 设备（Android 6.0+，推荐 Android 14+）
-2. 启动 App → 点击"启动 Vehicle Motion"
-3. **首次启动**：授予"显示在其他应用上层"权限
-4. 返回 App → 点击"▶ 启动"
-5. **观察**：圆点出现在屏幕上下边缘
-6. **摇晃手机**：圆点随运动方向移动
-7. **切换到微信/浏览器**：圆点仍然显示，覆盖在其他 App 上
-
-### 开发环境
+### 开发者：构建 + 发布
 
 ```bash
-# 1. 安装依赖
-npm install
+# 一键发布（升级 patch 版本号 + prebuild + 构建 + 上传 GitHub Release）
+.\release.ps1
 
-# 2. 生成 Android 原生代码
-npx expo prebuild --platform android --no-install
-
-# 3. 编译 Release APK
-cd android
-.\gradlew assembleRelease
-
-# APK 路径: android/app/build/outputs/apk/release/app-release.apk
+# 升级次版本号
+.\release.ps1 -BumpType minor
 ```
+
+完整发布流程详见 [AGENTS.md](./AGENTS.md)。
 
 ## 📱 兼容性
 
@@ -160,9 +156,10 @@ anti-car-sickness-rn/
 
 ## 🔧 已知限制
 
-- AVD 模拟器对陀螺仪支持有限，建议真机测试
+- 项目已切换为真机测试流程，不再依赖 AVD 模拟器
 - 部分国产 ROM（小米、华为、OPPO）需要在系统设置中额外允许后台运行
 - 16KB 页面设备需要原生 SO 库对齐（已在 Gradle 配置）
+- 用户反馈通过 GitHub Issue 收集，开发者据此迭代修复并发布新版本
 
 ## 📝 版本历史
 
