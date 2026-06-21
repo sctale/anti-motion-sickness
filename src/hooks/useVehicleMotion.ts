@@ -18,14 +18,22 @@ export function useVehicleMotion({ isActive, onMotionUpdate }: UseVehicleMotionO
   const processSensorData = useCallback((data: SensorData) => {
     const fusionResult = sensorFusion.process(data);
 
-    const motionState = motionAnalyzer.process(fusionResult, data.gyroscope.z);
+    const motionState = motionAnalyzer.process(
+      fusionResult,
+      fusionResult.filteredGyroZ
+    );
 
-    const predictedOffset = predictionEngine.process(motionState, data.gyroscope.z, data.timestamp);
+    const predictedOffset = predictionEngine.process(
+      motionState,
+      fusionResult.filteredGyroZ,
+      fusionResult.worldAcceleration.y,
+      data.timestamp
+    );
 
     const result: MotionData = {
       state: motionState.state,
       intensity: motionState.intensity,
-      gyroZ: data.gyroscope.z,
+      gyroZ: fusionResult.filteredGyroZ,
       accY: fusionResult.worldAcceleration.y,
       yaw: fusionResult.eulerAngles.yaw,
       pitch: fusionResult.eulerAngles.pitch,
@@ -42,7 +50,6 @@ export function useVehicleMotion({ isActive, onMotionUpdate }: UseVehicleMotionO
     if (isActive) {
       sensorService.start();
       setIsMonitoring(true);
-
       unsubscribeRef.current = sensorService.subscribe(processSensorData);
     } else {
       if (unsubscribeRef.current) {
@@ -71,13 +78,21 @@ export function useVehicleMotion({ isActive, onMotionUpdate }: UseVehicleMotionO
 
     const sensorData = sensorService.getCurrentData();
     const fusionResult = sensorFusion.process(sensorData);
-    const motionState = motionAnalyzer.process(fusionResult, sensorData.gyroscope.z);
-    const predictedOffset = predictionEngine.process(motionState, sensorData.gyroscope.z, sensorData.timestamp);
+    const motionState = motionAnalyzer.process(
+      fusionResult,
+      fusionResult.filteredGyroZ
+    );
+    const predictedOffset = predictionEngine.process(
+      motionState,
+      fusionResult.filteredGyroZ,
+      fusionResult.worldAcceleration.y,
+      sensorData.timestamp
+    );
 
     return {
       state: motionState.state,
       intensity: motionState.intensity,
-      gyroZ: sensorData.gyroscope.z,
+      gyroZ: fusionResult.filteredGyroZ,
       accY: fusionResult.worldAcceleration.y,
       yaw: fusionResult.eulerAngles.yaw,
       pitch: fusionResult.eulerAngles.pitch,

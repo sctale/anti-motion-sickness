@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect } from 'react';
-import { NativeModules, Platform, Linking, PermissionsAndroid } from 'react-native';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { NativeModules, Platform, Linking } from 'react-native';
 
 const { OverlayModule } = NativeModules;
 
@@ -15,6 +15,11 @@ export interface OverlayServiceHook {
 export function useOverlayService(): OverlayServiceHook {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+
+  const isRunningRef = useRef(false);
+  useEffect(() => {
+    isRunningRef.current = isRunning;
+  }, [isRunning]);
 
   const checkPermission = useCallback(async (): Promise<boolean> => {
     if (Platform.OS !== 'android') {
@@ -52,6 +57,7 @@ export function useOverlayService(): OverlayServiceHook {
     if (Platform.OS === 'android' && OverlayModule) {
       try {
         await OverlayModule.startService();
+        isRunningRef.current = true;
         setIsRunning(true);
       } catch (error) {
         console.error('Start service error:', error);
@@ -63,6 +69,7 @@ export function useOverlayService(): OverlayServiceHook {
     if (Platform.OS === 'android' && OverlayModule) {
       try {
         await OverlayModule.stopService();
+        isRunningRef.current = false;
         setIsRunning(false);
       } catch (error) {
         console.error('Stop service error:', error);
@@ -73,11 +80,14 @@ export function useOverlayService(): OverlayServiceHook {
   useEffect(() => {
     checkPermission();
     return () => {
-      if (isRunning) {
-        stopService();
+      if (isRunningRef.current && OverlayModule) {
+        OverlayModule.stopService().catch(() => {
+          /* ignore */
+        });
+        isRunningRef.current = false;
       }
     };
-  }, []);
+  }, [checkPermission]);
 
   return {
     hasPermission,

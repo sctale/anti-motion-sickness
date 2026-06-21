@@ -1,13 +1,20 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import * as Haptics from 'expo-haptics';
 import { Vibration } from 'react-native';
+import {
+  VIBRATION_LOW_INTERVAL_MS,
+  VIBRATION_MEDIUM_INTERVAL_MS,
+  VIBRATION_HIGH_INTERVAL_MS,
+  VIBRATION_MIN_GAP_MS,
+  VIBRATION_PULSE_MS,
+} from '../utils/constants';
 
 export type VibrationFrequency = 'low' | 'medium' | 'high';
 
 const FREQUENCY_INTERVALS: Record<VibrationFrequency, number> = {
-  low: 3000,
-  medium: 2000,
-  high: 1000,
+  low: VIBRATION_LOW_INTERVAL_MS,
+  medium: VIBRATION_MEDIUM_INTERVAL_MS,
+  high: VIBRATION_HIGH_INTERVAL_MS,
 };
 
 interface VibrationServiceProps {
@@ -29,12 +36,12 @@ export function useVibrationService({
 
   const triggerVibration = useCallback(() => {
     const now = Date.now();
-    if (now - lastVibrationRef.current < 200) return;
+    if (now - lastVibrationRef.current < VIBRATION_MIN_GAP_MS) return;
     lastVibrationRef.current = now;
 
-    Vibration.vibrate(100);
+    Vibration.vibrate(VIBRATION_PULSE_MS);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setVibrationCount(prev => prev + 1);
+    setVibrationCount((prev) => prev + 1);
     onVibrationTriggered?.();
   }, [onVibrationTriggered]);
 
