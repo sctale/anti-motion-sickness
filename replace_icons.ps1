@@ -1,6 +1,6 @@
 $ffmpeg = "D:\bin\ffmpeg.exe"
-$assets = "d:\V-Coding\anti-car-sickness-rn\assets"
-$res = "d:\V-Coding\anti-car-sickness-rn\android\app\src\main\res"
+$assets = Join-Path $PSScriptRoot "assets"
+$res = Join-Path $PSScriptRoot "android\app\src\main\res"
 
 $sizes = @{
     "mdpi" = 48

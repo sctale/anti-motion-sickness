@@ -178,7 +178,7 @@ function New-MonochromeIcon {
     $bmp.Dispose()
 }
 
-$assetsDir = "d:\V-Coding\anti-car-sickness-rn\assets"
+$assetsDir = Join-Path $PSScriptRoot "assets"
 
 Write-Host "生成 icon.png (1024x1024)..."
 New-AppIcon -Size 1024 -Path "$assetsDir\icon.png"
