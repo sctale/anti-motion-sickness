@@ -108,7 +108,7 @@ TYPE_APPLICATION_OVERLAY 窗口
 ## 📁 项目结构
 
 ```
-anti-car-sickness-rn/
+anti-car-sickness/
 ├── App.tsx                              # 入口（Home 多入口）
 ├── app.json                             # Expo 配置（Android 16 适配）
 ├── package.json                         # npm 依赖
