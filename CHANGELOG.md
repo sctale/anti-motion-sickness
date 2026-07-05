@@ -1,5 +1,24 @@
 # 更新日志 (Changelog)
 
+## [0.2.2] - 2026-06-21
+
+### 📌 流程固化
+
+- **明确本地构建策略**：本项目全部本地构建，不使用 GitHub Actions / CI（节省 Actions 配额和 storage）
+- `.gitignore` 增加 CI/CD 配置屏蔽：`.github/workflows/`、`.circleci/`、`.travis.yml`、`.gitlab-ci.yml`、`azure-pipelines.yml`、`Jenkinsfile`
+- 所有发布通过 `release.ps1` 一键脚本完成（本地 prebuild + gradlew assembleRelease + gh release upload）
+
+### 📜 文档同步
+
+- [AGENTS.md](./AGENTS.md) - 新增「构建策略」表格，明确不使用 GitHub Actions 的理由
+- [README.md](./README.md) - 「开发者：构建 + 发布」章节增加本地构建声明
+
+### 🗑️ 清理
+
+- 合并目录：删除废弃的 `anti-car-sickness-rn/`（仅含 Gradle 缓存残留），统一使用 `anti-car-sickness/`
+
+---
+
 ## [0.2.1] - 2026-06-21
 
 ### 🔄 流程变更

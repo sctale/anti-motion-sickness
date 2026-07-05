@@ -151,7 +151,25 @@ src/
 
 ## 🚀 一键发布流程（推荐）
 
-**项目采用真机测试策略**：本地构建 APK → 上传 GitHub Release → 用户手机真机测试。不再使用 AVD 模拟器。
+### 📌 构建策略
+
+**本项目全部本地构建，不使用 GitHub Actions / CI。**
+
+| 项目 | 策略 |
+|------|------|
+| 构建环境 | 开发者本地 Windows + Android SDK |
+| APK 构建 | `npx expo prebuild` + `gradlew assembleRelease` |
+| 发布方式 | `gh release upload` 上传到 GitHub Release |
+| 测试方式 | 用户下载 APK 真机测试 |
+| CI/CD | **不使用** GitHub Actions（节省 Actions 时间和 storage） |
+| 自动化 | `.github/workflows/` 已在 .gitignore 中屏蔽 |
+
+理由：
+- 本项目为 Android 原生 + RN 混合，构建环境依赖 Windows 上的 Android SDK + Gradle，CI 配置复杂
+- 发布频率低，本地一键脚本 `release.ps1` 已足够
+- 避免 GitHub Actions 配额和存储消耗
+
+**真机测试策略**：本地构建 APK → 上传 GitHub Release → 用户手机真机测试。不再使用 AVD 模拟器。
 
 ### 1. 一键发布到 GitHub
 

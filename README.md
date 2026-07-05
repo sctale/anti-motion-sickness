@@ -87,6 +87,8 @@ TYPE_APPLICATION_OVERLAY 窗口
 
 ### 开发者：构建 + 发布
 
+> **本项目全部本地构建，不使用 GitHub Actions / CI**（节省 Actions 配额和 storage）。所有发布通过 `release.ps1` 一键脚本完成。
+
 ```bash
 # 一键发布（升级 patch 版本号 + prebuild + 构建 + 上传 GitHub Release）
 .\release.ps1

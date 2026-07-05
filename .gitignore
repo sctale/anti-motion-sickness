@@ -82,5 +82,15 @@ AGENTS*.md
 .claude/
 CLAUDE.md
 
+# CI/CD - 本项目不使用 GitHub Actions，全部本地构建
+.github/workflows/
+.github/actions/
+.circleci/
+.travis.yml
+.gitlab-ci.yml
+azure-pipelines.yml
+Jenkinsfile
+
 # Scripts (project-specific)
 release_notes.md
+release_notes_*.md
