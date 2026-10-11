@@ -1,13 +1,13 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
   ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useOverlayService } from '../hooks/useOverlayService';
 
 interface VehicleMotionScreenProps {
@@ -20,19 +20,12 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
   const {
     hasPermission,
     isRunning,
+    isSupported,
     checkPermission,
     requestPermission,
     startService,
     stopService,
   } = useOverlayService();
-
-  useEffect(() => {
-    return () => {
-      if (isRunning) {
-        stopService();
-      }
-    };
-  }, [isRunning]);
 
   const handleStart = useCallback(async () => {
     setErrorMessage(null);
@@ -68,7 +61,7 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
   }, [isRunning, stopService, onExit]);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar
         barStyle="light-content"
         backgroundColor="#0F172A"
@@ -91,7 +84,16 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
           </Text>
         </View>
 
-        {hasPermission === false && (
+        {!isSupported && (
+          <View style={styles.warningCard}>
+            <Text style={styles.warningTitle}>⚠️ 原生模块未接入</Text>
+            <Text style={styles.warningText}>
+              当前构建不包含原生悬浮窗模块（OverlayModule），悬浮圆点无法显示。请使用包含原生层的 Android 构建。
+            </Text>
+          </View>
+        )}
+
+        {isSupported && hasPermission === false && (
           <View style={styles.warningCard}>
             <Text style={styles.warningTitle}>⚠️ 需要悬浮窗权限</Text>
             <Text style={styles.warningText}>

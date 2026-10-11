@@ -6,6 +6,8 @@ const { OverlayModule } = NativeModules;
 export interface OverlayServiceHook {
   hasPermission: boolean | null;
   isRunning: boolean;
+  /** 原生 OverlayModule 是否可用（未接入原生层时为 false） */
+  isSupported: boolean;
   checkPermission: () => Promise<boolean>;
   requestPermission: () => Promise<void>;
   startService: () => Promise<void>;
@@ -15,6 +17,8 @@ export interface OverlayServiceHook {
 export function useOverlayService(): OverlayServiceHook {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+
+  const isSupported = Platform.OS === 'android' ? !!OverlayModule : true;
 
   const isRunningRef = useRef(false);
   useEffect(() => {
@@ -54,26 +58,28 @@ export function useOverlayService(): OverlayServiceHook {
   }, []);
 
   const startService = useCallback(async (): Promise<void> => {
-    if (Platform.OS === 'android' && OverlayModule) {
-      try {
-        await OverlayModule.startService();
-        isRunningRef.current = true;
-        setIsRunning(true);
-      } catch (error) {
-        console.error('Start service error:', error);
-      }
+    if (Platform.OS !== 'android') return;
+    if (!OverlayModule) {
+      throw new Error('原生悬浮窗模块未接入，请先完成 Android 原生构建');
+    }
+    try {
+      await OverlayModule.startService();
+      isRunningRef.current = true;
+      setIsRunning(true);
+    } catch (error) {
+      console.error('Start service error:', error);
+      throw error;
     }
   }, []);
 
   const stopService = useCallback(async (): Promise<void> => {
-    if (Platform.OS === 'android' && OverlayModule) {
-      try {
-        await OverlayModule.stopService();
-        isRunningRef.current = false;
-        setIsRunning(false);
-      } catch (error) {
-        console.error('Stop service error:', error);
-      }
+    if (Platform.OS !== 'android' || !OverlayModule) return;
+    try {
+      await OverlayModule.stopService();
+      isRunningRef.current = false;
+      setIsRunning(false);
+    } catch (error) {
+      console.error('Stop service error:', error);
     }
   }, []);
 
@@ -92,6 +98,7 @@ export function useOverlayService(): OverlayServiceHook {
   return {
     hasPermission,
     isRunning,
+    isSupported,
     checkPermission,
     requestPermission,
     startService,

@@ -1,4 +1,4 @@
-# 🚗 防晕车助手 (Anti Motion Sickness) v0.2.0
+# 🚗 防晕车助手 (Anti Motion Sickness) v0.3.0
 
 基于 iOS Vehicle Motion Cues 的设计理念，使用 **Android 原生 ForegroundService + WindowManager** 实现的防晕车助手，通过屏幕边缘的动态圆点帮助缓解乘车时的晕车症状。完整适配 Android 16 (API 36)。
 
@@ -7,11 +7,10 @@
 - 🎯 **原生悬浮窗** - 使用 `TYPE_APPLICATION_OVERLAY` 系统级悬浮窗，覆盖在任何 App 之上
 - 🌀 **传感器融合** - 基于 `TYPE_ROTATION_VECTOR` 融合加速度计和陀螺仪数据
 - 🎨 **动态圆点** - 屏幕上下边缘各 8 个圆点（共 16 个），随车辆运动方向移动
-- ⚡ **实时响应** - 60Hz 采样率，SENSOR_DELAY_GAME 模式
+- ⚡ **实时响应** - SENSOR_DELAY_GAME 采样（~50-100Hz）
 - 🔋 **后台运行** - Foreground Service 后台持续运行
 - 🤖 **Android 16 适配** - 完整适配 Android 16 (API 36) 的所有新限制
-- 📳 **乘车检测** - 通过加速度计阈值法识别 IN_VEHICLE / WALKING / STILL
-- 🤸 **4 种练习模式** - shake / swipe / twist / auto
+- 📳 **乘车检测** - 通过线性加速度（已扣除重力）识别 IN_VEHICLE / WALKING / STILL
 
 ## 🏗️ 技术架构
 
@@ -53,21 +52,23 @@ TYPE_APPLICATION_OVERLAY 窗口
 | 预测时间 | 300ms |
 | 圆点数量 | 16 (上 8 下 8) |
 | 最大偏移 | 60dp |
-| 采样率 | 16ms (~60Hz) |
+| 采样率 | SENSOR_DELAY_GAME (~50-100Hz) |
 | 窗口类型 | TYPE_APPLICATION_OVERLAY |
 
-> 阈值常量定义于 [`src/utils/constants.ts`](./src/utils/constants.ts)
+> JS 层阈值常量定义于 [`src/utils/constants.ts`](./src/utils/constants.ts)；原生引擎常量定义于 [`native/android/`](./native/android/) 各 Kotlin 文件。
 
 ## 🤖 Android 16 适配要点
 
 | 规范项 | 处理 |
 |--------|------|
 | 预测性返回手势 | `app.json` 中 `predictiveBackGestureEnabled: true`，原生 `enableOnBackInvokedCallback="true"` |
-| 边缘到边缘 | `app.json` 中 `edgeToEdgeEnabled: true`，原生 `WindowCompat.setDecorFitsSystemWindows(window, false)` |
+| 边缘到边缘 | `app.json` 中 `edgeToEdgeEnabled: true`，UI 使用 `react-native-safe-area-context` 处理安全区 |
 | 前台服务类型 | `foregroundServiceType="specialUse"` + `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` |
 | 16KB 页面对齐 | Gradle/CMake 配置 `max-page-size=16384` |
 | 强制权限 | `SYSTEM_ALERT_WINDOW` + `POST_NOTIFICATIONS`（Android 13+） |
 | 状态栏 | `androidStatusBar` 显式声明 `barStyle` 与 `backgroundColor` |
+
+> ⚠️ 原生源码通过 Config Plugin 注入：`native/android/*.kt` 由 [`plugins/withOverlayModule.js`](./plugins/withOverlayModule.js) 在 `expo prebuild` 时复制到 `android/` 并自动注册。**不要手改 `android/` 目录**（已被 gitignore，prebuild 会重建）。
 
 ## 🚀 快速开始
 
@@ -114,45 +115,28 @@ anti-car-sickness/
 ├── App.tsx                              # 入口（Home 多入口）
 ├── app.json                             # Expo 配置（Android 16 适配）
 ├── package.json                         # npm 依赖
+├── plugins/
+│   └── withOverlayModule.js             # Config Plugin：注入原生源码 / 服务 / Package ⭐
+├── native/android/                      # 原生 Kotlin 源码（纳入版本管理）⭐
+│   ├── OverlayService.kt                # 前台服务（specialUse）
+│   ├── OverlayView.kt                   # 自定义 View（Canvas 16 圆点）
+│   ├── OverlayManager.kt                # TYPE_APPLICATION_OVERLAY 悬浮窗管理
+│   ├── OverlayModule.kt                 # RN 桥接模块
+│   ├── OverlayPackage.kt                # RN Package 注册
+│   ├── SensorFusion.kt                  # 旋转矢量 → 世界坐标系 + EMA
+│   ├── MotionAnalyzer.kt                # 状态机运动检测
+│   └── PredictionEngine.kt              # 一阶 / 二阶预测
 ├── android/                             # prebuild 生成（已 gitignore）
-│   └── app/src/main/
-│       ├── AndroidManifest.xml          # Android 清单
-│       └── java/com/anonymous/anticarsicknessrn/
-│           ├── MainActivity.kt          # 主 Activity
-│           ├── MainApplication.kt       # Application
-│           ├── OverlayService.kt        # 前台服务 ⭐
-│           ├── OverlayView.kt           # 自定义 View ⭐
-│           ├── OverlayManager.kt        # 悬浮窗管理 ⭐
-│           ├── OverlayModule.kt         # RN 桥接 ⭐
-│           ├── OverlayPackage.kt        # RN Package ⭐
-│           ├── SensorFusion.kt          # 传感器融合 ⭐
-│           ├── MotionAnalyzer.kt        # 运动分析 ⭐
-│           └── PredictionEngine.kt      # 预测引擎 ⭐
 ├── src/
 │   ├── hooks/
-│   │   ├── useOverlayService.ts         # 服务控制 Hook
-│   │   ├── useVehicleMotion.ts          # 运动数据 Hook
-│   │   ├── useActivityRecognition.ts    # 乘车检测 Hook
-│   │   ├── useAntiSickness.ts           # 练习模式 Hook
-│   │   ├── useVibrationService.ts       # 震动服务 Hook
-│   │   └── useMotionDetection.ts        # 动作识别 Hook
+│   │   ├── useOverlayService.ts         # 服务控制 Hook（悬浮窗权限 / 启停）
+│   │   ├── useActivityRecognition.ts    # 乘车检测 Hook（扣除重力的线性加速度）
+│   │   └── useVibrationService.ts       # 震动服务 Hook
 │   ├── screens/
 │   │   ├── VehicleMotionScreen.tsx      # 主功能屏
 │   │   └── CarDetectionScreen.tsx       # 乘车检测屏
-│   ├── components/
-│   │   ├── ModeSelector.tsx             # 模式选择
-│   │   ├── ExerciseView.tsx             # 练习视图
-│   │   └── CompleteScreen.tsx           # 完成页
-│   ├── services/                        # JS 端后备实现
-│   │   ├── SensorService.ts
-│   │   ├── SensorFusion.ts
-│   │   ├── MotionAnalyzer.ts
-│   │   └── PredictionEngine.ts
 │   └── utils/
-│       ├── constants.ts                 # 统一常量 ⭐
-│       ├── types.ts                     # 类型定义
-│       ├── coordinate.ts                # 坐标变换
-│       └── filter.ts                    # EMA / Kalman
+│       └── constants.ts                 # JS 层统一常量
 └── assets/                              # 图标资源
 ```
 

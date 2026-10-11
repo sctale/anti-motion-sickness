@@ -20,6 +20,9 @@ export const PREDICTION_GYRO_SENSITIVITY = 100;
 
 export const PREDICTION_ACCEL_SENSITIVITY = 30;
 
+// 加速度计（expo-sensors）单位为 g，静止时合矢量约为 1g（重力）
+export const GRAVITY_G = 1.0;
+
 export const ACCEL_MOTION_THRESHOLD = 0.3;
 export const STILL_MOTION_THRESHOLD = 0.1;
 

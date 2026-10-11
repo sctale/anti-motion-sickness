@@ -81,6 +81,21 @@ function Update-Version {
     Set-Content -Path $Path -Value $newContent -Encoding UTF8 -NoNewline
 }
 
+function Update-VersionCode {
+    param(
+        [string]$Path,
+        [int]$NewCode
+    )
+
+    $content = Get-Content $Path -Raw -Encoding UTF8
+    $newContent = [regex]::Replace($content, '("versionCode"\s*:\s*)\d+', "`${1}$NewCode")
+    if ($newContent -eq $content) {
+        Write-Warn "app.json 中未找到 versionCode 字段，未更新"
+        return
+    }
+    Set-Content -Path $Path -Value $newContent -Encoding UTF8 -NoNewline
+}
+
 function Get-ParsedVersion {
     param([string]$Version)
     $parts = $Version.Split('.')
@@ -146,7 +161,7 @@ if ($BumpType -ne "none") {
     Write-Host "  $currentVersion -> $newVersion  (versionCode = $newVersionCode)"
 
     Update-Version -Path $AppJson -OldVersion $currentVersion -NewVersion $newVersion -JsonKey "version"
-    Update-Version -Path $AppJson -OldVersion $currentVersion -NewVersion $newVersion -JsonKey "android.versionCode" -ErrorAction SilentlyContinue
+    Update-VersionCode -Path $AppJson -NewCode $newVersionCode
     Update-Version -Path $PackageJson -OldVersion $currentVersion -NewVersion $newVersion
 
     # 同步到 CHANGELOG

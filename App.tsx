@@ -6,15 +6,27 @@ import {
   TouchableOpacity,
   Platform,
   StatusBar,
-  SafeAreaView,
   ScrollView,
 } from 'react-native';
+import Constants from 'expo-constants';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { VehicleMotionScreen } from './src/screens/VehicleMotionScreen';
 import { CarDetectionScreen } from './src/screens/CarDetectionScreen';
 
 type Screen = 'home' | 'vehicleMotion' | 'carDetection';
 
+// 版本号单一数据源：app.json -> expo.version（由 expo-constants 读取）
+const APP_VERSION = Constants.expoConfig?.version ?? '0.0.0';
+
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <RootNavigator />
+    </SafeAreaProvider>
+  );
+}
+
+function RootNavigator() {
   const [screen, setScreen] = useState<Screen>('home');
 
   if (screen === 'vehicleMotion') {
@@ -26,7 +38,7 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
       <StatusBar
         barStyle="dark-content"
         backgroundColor="#F8FAFC"
@@ -70,7 +82,7 @@ export default function App() {
         <Text style={styles.footerText}>
           💡 提示：首次启动需要授予悬浮窗权限
         </Text>
-        <Text style={styles.versionText}>v0.2.0 - Native Overlay · Android 16</Text>
+        <Text style={styles.versionText}>v{APP_VERSION} - Native Overlay · Android 16</Text>
       </View>
     </SafeAreaView>
   );

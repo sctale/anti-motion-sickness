@@ -40,7 +40,9 @@ export function useVibrationService({
     lastVibrationRef.current = now;
 
     Vibration.vibrate(VIBRATION_PULSE_MS);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {
+      /* 部分设备无震动马达，忽略 */
+    });
     setVibrationCount((prev) => prev + 1);
     onVibrationTriggered?.();
   }, [onVibrationTriggered]);
@@ -82,12 +84,6 @@ export function useVibrationService({
       stopVibration();
     };
   }, [isActive, enabled, frequency, startPeriodicVibration, stopVibration]);
-
-  useEffect(() => {
-    if (isActive && enabled) {
-      startPeriodicVibration();
-    }
-  }, [frequency, isActive, enabled, startPeriodicVibration]);
 
   return {
     vibrationCount,

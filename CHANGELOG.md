@@ -1,5 +1,32 @@
 # 更新日志 (Changelog)
 
+## [0.3.0] - 2026-10-11
+
+### 🐛 关键修复
+
+- **原生模块入库（Critical）**: 此前 `OverlayModule` / `OverlayService` 等原生源码只存在于被 gitignore 的 `android/` 目录，新克隆仓库 `prebuild` 后原生模块缺失、悬浮窗功能整体失效。现改为 `native/android/*.kt` 纳入版本管理，并通过 Config Plugin [plugins/withOverlayModule.js](./plugins/withOverlayModule.js) 在 prebuild 时自动注入 + 注册 service/Package。
+- **乘车检测未扣除重力（Critical）**: 加速度计单位是 g，静止时合矢量约 1g，原阈值判定把所有静止/轻晃都判为 `IN_VEHICLE`。已改为 `|magnitude - 1g|` 计算线性加速度（新增常量 `GRAVITY_G`）。
+- **release.ps1 不递增 versionCode（Critical）**: 原 `Update-Version -JsonKey "android.versionCode"` 匹配不到数字字段，导致每个版本 versionCode 恒为 202、无法覆盖安装。新增 `Update-VersionCode` 按 `major*10000+minor*100+patch` 正确写入。
+- **缺少原生模块时误报权限问题**: `useOverlayService` 新增 `isSupported`，缺原生模块时给出明确提示并让 `startService` 抛错。
+- **useVibrationService**: 删除重复的第二个 effect；`Haptics.impactAsync` 补充异常捕获。
+- **CarDetectionScreen**: 修复状态栏样式缺失、移除未使用变量。
+
+### ♻️ 重构 / 清理
+
+- 删除不可达死代码：`src/services/*`、`useVehicleMotion`、`useAntiSickness`、`useMotionDetection`、`components/*`（ModeSelector/ExerciseView/CompleteScreen）、`src/assets/*.json`、`utils/{types,coordinate,filter}.ts`。
+- 依赖调整：移除 `lottie-react-native`、`react-native-reanimated`、`expo-local-authentication`、`expo-status-bar`（均未使用）；新增 `expo-constants`（读取版本号）、`react-native-safe-area-context`。
+- **版本号单一数据源**: `App.tsx` 改为通过 `expo-constants` 读取 `app.json.expo.version`，消除硬编码漂移。
+
+### 🤖 Android 16
+
+- edge-to-edge 安全区改用 `react-native-safe-area-context`（RN 内置 `SafeAreaView` 在 Android 无效）。
+
+### 📜 文档同步
+
+- README / AGENTS 更新项目结构、依赖清单、原生源码注入说明；采样率描述统一为 SENSOR_DELAY_GAME。
+
+---
+
 ## [0.2.2] - 2026-06-21
 
 ### 📌 流程固化

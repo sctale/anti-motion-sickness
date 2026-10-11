@@ -27,14 +27,12 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before 
 ```json
 {
   "expo": "~56.0.8",
+  "expo-constants": "~56.0.4",
   "expo-haptics": "^56.0.3",
-  "expo-local-authentication": "^56.0.4",
   "expo-sensors": "^56.0.5",
-  "expo-status-bar": "~56.0.4",
-  "lottie-react-native": "^7.3.8",
   "react": "19.2.3",
   "react-native": "0.85.3",
-  "react-native-reanimated": "^4.4.0"
+  "react-native-safe-area-context": "~5.6.0"
 }
 ```
 
@@ -58,10 +56,11 @@ TYPE_APPLICATION_OVERLAY 窗口
 
 ### 原生 Android 模块结构
 
+原生源码**纳入版本管理**，存放于 `native/android/`，由 Config Plugin 在 prebuild 时注入 `android/`：
+
 ```
-android/app/src/main/java/com/anonymous/anticarsicknessrn/
-├── MainActivity.kt          # 主 Activity（android:screenOrientation="portrait"）
-├── MainApplication.kt       # Application（注册 OverlayPackage）
+plugins/withOverlayModule.js   # Config Plugin：复制 .kt + 注册 service/Package
+native/android/
 ├── OverlayService.kt        # Foreground Service ⭐ 核心
 ├── OverlayView.kt           # Canvas 自定义 View，绘制 16 个圆点 ⭐
 ├── OverlayManager.kt        # WindowManager 悬浮窗管理 ⭐
@@ -70,29 +69,26 @@ android/app/src/main/java/com/anonymous/anticarsicknessrn/
 ├── SensorFusion.kt          # 旋转矢量 → 世界坐标系 + EMA 滤波 ⭐
 ├── MotionAnalyzer.kt        # 状态机检测运动 ⭐
 └── PredictionEngine.kt      # 一阶/二阶运动预测 ⭐
+
+# prebuild 后会被注入到：
+# android/app/src/main/java/com/anonymous/anticarsicknessrn/
 ```
+
+> ⚠️ 不要直接修改 `android/` 下的 Kotlin 文件（该目录被 gitignore，prebuild 会重建）。所有原生改动请改 `native/android/`。
 
 ### React Native 代码结构
 
 ```
 src/
 ├── hooks/
-│   ├── useOverlayService.ts     # 控制原生服务
-│   ├── useVehicleMotion.ts      # 运动数据 Hook
-│   ├── useActivityRecognition.ts # 乘车检测
-│   ├── useAntiSickness.ts       # 练习模式（shake/swipe/twist/auto）
-│   ├── useVibrationService.ts   # 震动服务
-│   └── useMotionDetection.ts    # 动作识别
+│   ├── useOverlayService.ts      # 控制原生服务（权限 / 启停）
+│   ├── useActivityRecognition.ts # 乘车检测（扣除重力的线性加速度）
+│   └── useVibrationService.ts    # 震动服务
 ├── screens/
-│   ├── VehicleMotionScreen.tsx  # 主功能屏
-│   └── CarDetectionScreen.tsx   # 乘车检测屏
-├── components/                  # UI 组件
-├── services/                    # JS 端后备实现
+│   ├── VehicleMotionScreen.tsx   # 主功能屏
+│   └── CarDetectionScreen.tsx    # 乘车检测屏
 └── utils/
-    ├── constants.ts             # 统一常量 ⭐
-    ├── types.ts                 # 类型定义
-    ├── coordinate.ts            # 坐标变换
-    └── filter.ts                # EMA / Kalman
+    └── constants.ts              # JS 层统一常量 ⭐
 ```
 
 **注意**：实际运动处理在 **原生 Kotlin** 层（`OverlayService.kt` 等），JS 层只是简单的服务控制。

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { Accelerometer } from 'expo-sensors';
 import {
+  GRAVITY_G,
   ACCEL_MOTION_THRESHOLD,
   STILL_MOTION_THRESHOLD,
   ACTIVITY_VEHICLE_SAMPLING_WINDOW_MS,
@@ -119,9 +120,9 @@ export function useActivityRecognition({
     lastUpdateRef.current = Date.now();
 
     const subscription = Accelerometer.addListener((data) => {
-      const motionLevel = Math.sqrt(
-        data.x ** 2 + data.y ** 2 + data.z ** 2
-      );
+      // 合矢量包含重力，先扣除静止时的 1g 基线，得到线性加速度（单位 g）
+      const magnitude = Math.sqrt(data.x ** 2 + data.y ** 2 + data.z ** 2);
+      const motionLevel = Math.abs(magnitude - GRAVITY_G);
       accumulatorRef.current += motionLevel;
       updateActivity(motionLevel, Date.now());
     });
