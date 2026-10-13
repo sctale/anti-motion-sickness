@@ -339,7 +339,7 @@ git push origin main; git push origin $env:VER
 | 脚本 | 作用 |
 |------|------|
 | `release.ps1` | 一键发布到 GitHub Release（推荐入口） |
-| `generate_icons.ps1` | 重新生成 `assets/*.png` 图标源文件 |
+| `tools/icons/render.mjs` | 重新生成 `assets/*.png` 图标（设计稿即代码；`npm i --no-save sharp && node tools/icons/render.mjs`，并会输出 `tools/icons/preview.png` 遮罩预览） |
 | `replace_icons.ps1` | 把 `assets/*.png` 替换到 `android/app/src/main/res/mipmap-*/` |
 
 > 所有脚本都使用 `$PSScriptRoot` 解析路径，可在任意位置调用。
@@ -498,10 +498,9 @@ native/android/            # 原生 Kotlin 源码（8 个文件，必须入库�
 plugins/                   # Config Plugin（prebuild 注入原生层）⭐
 tools/verify/              # 算法验证台（JVM 运行，无需真机）
 .github/workflows/         # 手动触发的 APK 构建工作流（唯一允许的 CI 文件）
-assets/                    # 图标资源
+assets/                    # 图标资源（源文件由 tools/icons/render.mjs 生成）
 release.ps1                # 一键发布脚本
-generate_icons.ps1         # 图标生成
-replace_icons.ps1          # 图标替换
+replace_icons.ps1          # 图标替换（PNG → android mipmap）
 LICENSE                    # MIT
 ```
 
