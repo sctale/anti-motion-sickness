@@ -5,11 +5,15 @@ import {
   TouchableOpacity,
   StyleSheet,
   Switch,
-  SafeAreaView,
   StatusBar,
   Platform,
 } from 'react-native';
-import { useActivityRecognition, ActivityType } from '../hooks/useActivityRecognition';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  useActivityRecognition,
+  ActivityType,
+  ActivityRecognitionResult,
+} from '../hooks/useActivityRecognition';
 import { useVibrationService, VibrationFrequency } from '../hooks/useVibrationService';
 
 interface CarDetectionScreenProps {
@@ -39,15 +43,12 @@ export const CarDetectionScreen: React.FC<CarDetectionScreenProps> = ({ onExit }
   const [currentActivity, setCurrentActivity] = useState<ActivityType>('STILL');
   const [confidence, setConfidence] = useState(0);
 
-  const handleActivityChange = useCallback((result: any) => {
+  const handleActivityChange = useCallback((result: ActivityRecognitionResult) => {
     setCurrentActivity(result.activity);
     setConfidence(result.confidence);
   }, []);
 
-  const {
-    isMonitoring,
-    confidence: activityConfidence,
-  } = useActivityRecognition({
+  useActivityRecognition({
     isActive: isDetectionActive,
     onActivityChanged: handleActivityChange,
   });
@@ -79,7 +80,8 @@ export const CarDetectionScreen: React.FC<CarDetectionScreenProps> = ({ onExit }
   }, []);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
+      <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" translucent={false} />
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={onExit}>
           <Text style={styles.backButtonText}>← 返回</Text>

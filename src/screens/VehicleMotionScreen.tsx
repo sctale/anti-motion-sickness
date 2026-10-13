@@ -1,13 +1,14 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
   ScrollView,
+  Switch,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useOverlayService } from '../hooks/useOverlayService';
 
 interface VehicleMotionScreenProps {
@@ -16,23 +17,18 @@ interface VehicleMotionScreenProps {
 
 export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit }) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // 对标 Apple「自动」/ Google「Start in a moving vehicle」：静止时隐藏圆点
+  const [autoMode, setAutoMode] = useState(true);
 
   const {
     hasPermission,
     isRunning,
+    isSupported,
     checkPermission,
     requestPermission,
     startService,
     stopService,
   } = useOverlayService();
-
-  useEffect(() => {
-    return () => {
-      if (isRunning) {
-        stopService();
-      }
-    };
-  }, [isRunning]);
 
   const handleStart = useCallback(async () => {
     setErrorMessage(null);
@@ -42,11 +38,11 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
       return;
     }
     try {
-      await startService();
+      await startService(autoMode);
     } catch (e) {
       setErrorMessage('启动服务失败：' + (e as Error).message);
     }
-  }, [checkPermission, startService]);
+  }, [checkPermission, startService, autoMode]);
 
   const handleRequestPermission = useCallback(async () => {
     setErrorMessage(null);
@@ -68,7 +64,7 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
   }, [isRunning, stopService, onExit]);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar
         barStyle="light-content"
         backgroundColor="#0F172A"
@@ -91,7 +87,16 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
           </Text>
         </View>
 
-        {hasPermission === false && (
+        {!isSupported && (
+          <View style={styles.warningCard}>
+            <Text style={styles.warningTitle}>⚠️ 原生模块未接入</Text>
+            <Text style={styles.warningText}>
+              当前构建不包含原生悬浮窗模块（OverlayModule），悬浮圆点无法显示。请使用包含原生层的 Android 构建。
+            </Text>
+          </View>
+        )}
+
+        {isSupported && hasPermission === false && (
           <View style={styles.warningCard}>
             <Text style={styles.warningTitle}>⚠️ 需要悬浮窗权限</Text>
             <Text style={styles.warningText}>
@@ -115,10 +120,25 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
         <View style={styles.controlsCard}>
           <Text style={styles.controlsTitle}>控制面板</Text>
 
+          <View style={styles.controlRow}>
+            <View style={styles.controlLabelBlock}>
+              <Text style={styles.controlLabel}>自动模式</Text>
+              <Text style={styles.controlHint}>
+                检测到车辆运动时显示圆点，静止约 10 秒后自动隐藏（启动时生效）
+              </Text>
+            </View>
+            <Switch
+              value={autoMode}
+              onValueChange={setAutoMode}
+              trackColor={{ false: '#334155', true: '#6366F1' }}
+              thumbColor="#fff"
+            />
+          </View>
+
           <TouchableOpacity
             style={[styles.controlButton, isRunning && styles.controlButtonActive]}
             onPress={isRunning ? handleStop : handleStart}
-            disabled={hasPermission === false}
+            disabled={!isSupported || hasPermission === false}
           >
             <Text style={styles.controlButtonText}>
               {isRunning ? '⏸ 暂停' : '▶ 启动'}
@@ -130,27 +150,37 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
           <Text style={styles.infoTitle}>工作原理</Text>
           <View style={styles.infoRow}>
             <Text style={styles.infoBullet}>•</Text>
-            <Text style={styles.infoText}>传感器融合 (TYPE_ROTATION_VECTOR)</Text>
+            <Text style={styles.infoText}>
+              旋转矢量融合，圆点左右各 8 个（共 16 个）
+            </Text>
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoBullet}>•</Text>
-            <Text style={styles.infoText}>EMA滤波 (alpha=0.15) 平滑数据</Text>
+            <Text style={styles.infoText}>
+              横向提示：左转圆点右移、右转左移（偏航角速度 + 横向加速度）
+            </Text>
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoBullet}>•</Text>
-            <Text style={styles.infoText}>状态机检测运动方向</Text>
+            <Text style={styles.infoText}>
+              纵向提示：加速圆点下滑、刹车上滑（同车窗外景物流向）
+            </Text>
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoBullet}>•</Text>
-            <Text style={styles.infoText}>预测引擎提前300ms渲染</Text>
+            <Text style={styles.infoText}>
+              姿态自适应：竖握、平放均能正确识别转向
+            </Text>
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoBullet}>•</Text>
-            <Text style={styles.infoText}>屏幕边缘16个圆点 (上8下8)</Text>
+            <Text style={styles.infoText}>
+              临界阻尼弹簧平滑，圆点始终停留在屏幕两侧
+            </Text>
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoBullet}>•</Text>
-            <Text style={styles.infoText}>覆盖其他APP显示</Text>
+            <Text style={styles.infoText}>覆盖其他 App 显示，息屏自动暂停省电</Text>
           </View>
         </View>
       </ScrollView>
@@ -266,6 +296,27 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 16,
+  },
+  controlRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  controlLabelBlock: {
+    flex: 1,
+    marginRight: 12,
+  },
+  controlLabel: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  controlHint: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 12,
+    lineHeight: 17,
   },
   controlButton: {
     backgroundColor: '#6366F1',

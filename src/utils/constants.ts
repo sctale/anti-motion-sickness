@@ -1,24 +1,13 @@
-export const SENSOR_UPDATE_INTERVAL_MS = 16;
+/**
+ * JS 层常量。
+ *
+ * 注意：悬浮窗圆点的运动学参数（阈值、增益、滤波系数）全部在原生层，
+ * 见 native/android/ 下的 MotionCueEngine.kt / SensorFusion.kt / OverlayView.kt。
+ */
 
-export const EMA_ALPHA = 0.15;
-
-export const TURN_THRESHOLD_RAD_S = 0.3;
-
-export const ACCEL_THRESHOLD_M_S2 = 1.2;
-
-export const PREDICTION_LEAD_TIME_S = 0.3;
-
-export const DOT_COUNT_TOP = 8;
-
-export const DOT_COUNT_BOTTOM = 8;
-
-export const DOT_TOTAL = DOT_COUNT_TOP + DOT_COUNT_BOTTOM;
-
-export const DOT_MAX_OFFSET_DP = 60;
-
-export const PREDICTION_GYRO_SENSITIVITY = 100;
-
-export const PREDICTION_ACCEL_SENSITIVITY = 30;
+// ===== 乘车检测（useActivityRecognition）=====
+// 加速度计（expo-sensors）单位为 g，静止时合矢量约为 1g（重力）
+export const GRAVITY_G = 1.0;
 
 export const ACCEL_MOTION_THRESHOLD = 0.3;
 export const STILL_MOTION_THRESHOLD = 0.1;
@@ -28,11 +17,7 @@ export const ACTIVITY_CONFIDENCE_INCREASE = 20;
 export const ACTIVITY_CONFIDENCE_DECREASE = 10;
 export const ACTIVITY_DEFAULT_SAMPLING_INTERVAL_MS = 500;
 
-export const SHAKE_DETECTION_THRESHOLD = 1.5;
-export const SWIPE_DETECTION_THRESHOLD = 2.0;
-export const TWIST_DETECTION_THRESHOLD_DEG = 30;
-export const MOTION_SENSOR_INTERVAL_MS = 100;
-
+// ===== 震动反馈（useVibrationService）=====
 export const VIBRATION_LOW_INTERVAL_MS = 3000;
 export const VIBRATION_MEDIUM_INTERVAL_MS = 2000;
 export const VIBRATION_HIGH_INTERVAL_MS = 1000;
