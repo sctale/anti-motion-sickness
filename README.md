@@ -1,4 +1,4 @@
-# 🚗 防晕车助手 (Anti Motion Sickness) v0.3.1
+# 🚗 防晕车助手 (Anti Motion Sickness) v0.3.2
 
 基于 iOS Vehicle Motion Cues 的设计理念，使用 **Android 原生 ForegroundService + WindowManager** 实现的防晕车助手，通过屏幕边缘的动态圆点帮助缓解乘车时的晕车症状。完整适配 Android 16 (API 36)。
 
