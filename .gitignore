@@ -11,9 +11,9 @@ package-lock.json
 dist/
 web-build/
 
-# Native
-android/
-ios/
+# Native（仅忽略 prebuild 生成的根目录 android/ios，native/android 源码必须入库）
+/android/
+/ios/
 *.apk
 *.aab
 *.ipa

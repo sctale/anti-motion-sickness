@@ -18,9 +18,7 @@
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
-        "android.permission.POST_NOTIFICATIONS",
-        "android.permission.WAKE_LOCK",
-        "android.permission.HIGH_SAMPLING_RATE_SENSORS"
+        "android.permission.POST_NOTIFICATIONS"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -28,13 +26,7 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": true,
-      "edgeToEdgeEnabled": true
-    },
-    "androidStatusBar": {
-      "barStyle": "dark-content",
-      "backgroundColor": "#F8FAFC",
-      "translucent": false
+      "predictiveBackGestureEnabled": true
     },
     "web": {
       "favicon": "./assets/favicon.png"

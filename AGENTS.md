@@ -30,6 +30,7 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before 
   "expo-constants": "~56.0.4",
   "expo-haptics": "^56.0.3",
   "expo-sensors": "^56.0.5",
+  "expo-system-ui": "~56.0.5",
   "react": "19.2.3",
   "react-native": "0.85.3",
   "react-native-safe-area-context": "~5.6.0"
@@ -47,9 +48,9 @@ OverlayModule (Native Module 桥接)
        ↓
 OverlayService (Foreground Service)
        ↓
-SensorManager → SensorFusion → MotionAnalyzer → PredictionEngine
+SensorManager → SensorFusion → MotionCueEngine
        ↓
-OverlayManager → OverlayView (Canvas 绘制 16 个圆点)
+OverlayManager → OverlayView (Canvas 绘制左右两列圆点)
        ↓
 TYPE_APPLICATION_OVERLAY 窗口
 ```
@@ -59,56 +60,89 @@ TYPE_APPLICATION_OVERLAY 窗口
 原生源码**纳入版本管理**，存放于 `native/android/`，由 Config Plugin 在 prebuild 时注入 `android/`：
 
 ```
-plugins/withOverlayModule.js   # Config Plugin：复制 .kt + 注册 service/Package
+plugins/withOverlayModule.js   # Config Plugin：复制 .kt（改写包名）+ 注册 service/Package + 通知图标
 native/android/
-├── OverlayService.kt        # Foreground Service ⭐ 核心
-├── OverlayView.kt           # Canvas 自定义 View，绘制 16 个圆点 ⭐
-├── OverlayManager.kt        # WindowManager 悬浮窗管理 ⭐
-├── OverlayModule.kt         # React Native Native Module ⭐
-├── OverlayPackage.kt        # React Native Package 注册 ⭐
-├── SensorFusion.kt          # 旋转矢量 → 世界坐标系 + EMA 滤波 ⭐
-├── MotionAnalyzer.kt        # 状态机检测运动 ⭐
-└── PredictionEngine.kt      # 一阶/二阶运动预测 ⭐
+├── OverlayService.kt        # 前台服务：传感器注册/回退、息屏暂停、通知与「停止」操作 ⭐
+├── OverlayView.kt           # Canvas 自定义 View：左右各 8 个圆点，白点 + 深色描边 ⭐
+├── OverlayManager.kt        # WindowManager 悬浮窗管理（不聚焦、不拦截触摸）⭐
+├── OverlayModule.kt         # RN 桥接：权限 / 启停 / isServiceRunning ⭐
+├── OverlayPackage.kt        # RN Package 注册 ⭐
+├── SensorFusion.kt          # 世界坐标系融合、重力扣除回退、世界垂直轴偏航角速度 ⭐
+├── MotionCueEngine.kt       # 姿态自适应方向映射、死区、临界阻尼弹簧、自动模式 ⭐
+└── RotationMath.kt          # 旋转矢量 → 旋转矩阵（纯数学，与 Android 约定一致）
 
 # prebuild 后会被注入到：
 # android/app/src/main/java/com/anonymous/anticarsicknessrn/
 ```
 
-> ⚠️ 不要直接修改 `android/` 下的 Kotlin 文件（该目录被 gitignore，prebuild 会重建）。所有原生改动请改 `native/android/`。
+> ⚠️ 不要直接修改 `android/` 下的 Kotlin 文件（prebuild 会重建）。所有原生改动请改 `native/android/`。
+> ⚠️ `.gitignore` 必须用根锚定 `/android/`，否则 `native/android/` 会被一并忽略（历史踩坑）。
 
 ### React Native 代码结构
 
 ```
 src/
 ├── hooks/
-│   ├── useOverlayService.ts      # 控制原生服务（权限 / 启停）
+│   ├── useOverlayService.ts      # 控制原生服务（权限 / 启停 / 自动模式 / 运行状态同步）
 │   ├── useActivityRecognition.ts # 乘车检测（扣除重力的线性加速度）
 │   └── useVibrationService.ts    # 震动服务
 ├── screens/
-│   ├── VehicleMotionScreen.tsx   # 主功能屏
+│   ├── VehicleMotionScreen.tsx   # 主功能屏（含自动模式开关）
 │   └── CarDetectionScreen.tsx    # 乘车检测屏
 └── utils/
-    └── constants.ts              # JS 层统一常量 ⭐
+    └── constants.ts              # JS 层常量（乘车检测 / 震动；运动学参数在原生层）
 ```
 
-**注意**：实际运动处理在 **原生 Kotlin** 层（`OverlayService.kt` 等），JS 层只是简单的服务控制。
+**注意**：实际运动处理在 **原生 Kotlin** 层（`OverlayService.kt` / `MotionCueEngine.kt`），JS 层只是服务控制。
+
+### 运动提示算法（对标 Apple Vehicle Motion Cues）
+
+方向语义（模拟「车窗外景物流向」）：
+
+| 车辆运动 | 圆点运动 |
+|---------|---------|
+| 加速前进 | 自上而下流动 |
+| 刹车 | 自下而上流动 |
+| 左转 | 整体向右移动 |
+| 右转 | 整体向左移动 |
+
+实现要点：
+
+1. **转向检测用世界垂直轴偏航角速度**（`R · gyro`，与手持姿态无关）。**不要**直接用设备 Z 轴陀螺仪：竖握手机时车头转向的分量在设备 Y 轴上，只用 Z 轴会完全无响应。
+2. **前进方向由姿态自适应推断**：竖握时 ≈ 屏幕背面朝向（手机顶部朝上、屏幕朝乘客），平放时 ≈ 屏幕上边缘朝向，按屏幕倾角平滑混合。
+3. **不要使用世界坐标 Y 轴（磁北）作为前进方向** —— 车头朝向与磁北无关。
+4. 横向提示同时使用偏航角速度（瞬时、跟手）与横向加速度（转弯持续力），两者符号一致。
+5. 使用临界阻尼弹簧平滑，不使用一阶/二阶「提前 N ms 预测」。
 
 ### 关键参数
 
 | 参数 | 值 | 说明 |
 |------|-----|------|
-| EMA alpha | 0.15 | 指数移动平均滤波系数 |
-| 左转阈值 | gyroZ > 0.3 rad/s | 陀螺仪 Z 轴角速度 |
-| 右转阈值 | gyroZ < -0.3 rad/s | 陀螺仪 Z 轴角速度 |
-| 加速阈值 | accY > 1.2 m/s² | 加速度计 Y 轴（世界坐标系） |
-| 刹车阈值 | accY < -1.2 m/s² | 加速度计 Y 轴（世界坐标系） |
-| 预测时间 | 300ms | 一阶/二阶预测提前量 |
-| 圆点数量 | 16 (上 8 下 8) | 屏幕边缘圆点 |
-| 最大偏移 | 60dp | 圆点最大移动距离 |
-| 采样率 | SENSOR_DELAY_GAME | ~50-100Hz |
-| 窗口类型 | TYPE_APPLICATION_OVERLAY | Android 系统级悬浮窗 |
+| 圆点数量 | 16（左右各 8） | 纵向分布 15%~85% 屏高 |
+| 边缘带宽度 | ≤ 56dp | 圆点不侵入内容区 |
+| 水平 / 垂直最大位移 | ±40dp / ±48dp | 转向 / 加减速 |
+| 偏航增益 | 110 dp/(rad/s) | 转向瞬时响应 |
+| 横向 / 纵向加速度增益 | 20 / 24 dp/(m/s²) | 转弯持续力 / 加减速 |
+| 死区 | 0.12 m/s²，0.015 rad/s | 抑制静止噪声 |
+| 弹簧 | ω=12 rad/s，ζ=1.0 | 无过冲，约 0.25s 跟上 |
+| 自动模式静止超时 | 10s（淡出 0.8s） | 对标 Apple「自动」 |
+| 采样率 | SENSOR_DELAY_GAME | ~50-100Hz，息屏暂停 |
+| 窗口类型 | TYPE_APPLICATION_OVERLAY | 系统级悬浮窗，不拦截触摸 |
 
-> 阈值常量定义于 [`src/utils/constants.ts`](./src/utils/constants.ts)，单点修改即可全局生效。
+> 运动学参数定义于 [`native/android/MotionCueEngine.kt`](./native/android/MotionCueEngine.kt) 的 `CueConfig`；
+> 绘制参数定义于 [`native/android/OverlayView.kt`](./native/android/OverlayView.kt) 常量；
+> JS 层常量见 [`src/utils/constants.ts`](./src/utils/constants.ts)。
+
+### 算法验证（改算法后必须跑）
+
+核心算法是纯 Kotlin、不依赖 Android API，可在 JVM 上回归：
+
+```bash
+bash tools/verify/run.sh
+```
+
+覆盖 11 个场景：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式、重力回退、极端限幅。
+修改 `SensorFusion.kt` / `MotionCueEngine.kt` / `RotationMath.kt` 后必须全部断言通过。
 
 ### AndroidManifest 关键配置
 
@@ -118,9 +152,6 @@ src/
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-<uses-permission android:name="android.permission.WAKE_LOCK"/>
-<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
-<uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS"/>
 
 <!-- 服务 -->
 <service
@@ -137,11 +168,11 @@ src/
 
 | 规范项 | 处理方式 |
 |--------|----------|
-| 预测性返回手势 | `app.json` 中 `predictiveBackGestureEnabled: true`，原生 `enableOnBackInvokedCallback="true"` |
-| 边缘到边缘 | `app.json` 中 `edgeToEdgeEnabled: true`，原生 `WindowCompat.setDecorFitsSystemWindows(window, false)` |
-| 前台服务类型 | `foregroundServiceType="specialUse"` + `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` |
+| 预测性返回手势 | `app.json` 中 `predictiveBackGestureEnabled: true` |
+| 边缘到边缘 | Android 16 强制执行（无需配置）；UI 用 `react-native-safe-area-context` 处理安全区 |
+| 前台服务类型 | `foregroundServiceType="specialUse"` + `PROPERTY_SPECIAL_USE_FGS_SUBTYPE`（Config Plugin 注入） |
 | 16KB 页面对齐 | Gradle/CMake 配置 `max-page-size=16384`（生成项目后需手动添加） |
-| 状态栏 | `androidStatusBar` 显式声明 `barStyle` 与 `backgroundColor` |
+| 状态栏 | 各屏用 RN `StatusBar` 组件显式声明（`androidStatusBar` / `edgeToEdgeEnabled` 在新版 Expo 已失效，勿再使用） |
 
 ---
 
@@ -353,9 +384,13 @@ $env:GH_TOKEN = "ghp_xxx"
 
 ### 圆点不移动（真机）
 
-- **传感器数据为空**：检查 `TYPE_ROTATION_VECTOR` 传感器是否存在
-- **启动后立即停止**：检查 Foreground Service 通知是否被关闭
-- **真机没动**：手动摇晃手机测试
+排障顺序（按发生概率）：
+
+1. **自动模式**：默认开启，「自动模式」下车辆静止时圆点会淡出（这是预期行为）。先确认开关或先在真机上摇动/开车测试。
+2. **传感器数据为空**：检查设备是否有 `TYPE_ROTATION_VECTOR` 与（`TYPE_LINEAR_ACCELERATION` 或 `TYPE_ACCELEROMETER`）；服务会打印/降级处理。
+3. **启动后立即停止**：`OverlayService.isRunning` 为 false —— 检查悬浮窗权限是否被撤销、通知权限与国产 ROM 的后台限制。
+4. **方向不对**：先跑 `bash tools/verify/run.sh` 验证算法（无需真机）；再确认手机不是「屏幕朝上平放且顶部朝向乘客」这类反直觉姿态。
+5. **辅助手段**：`adb shell dumpsys activity services <包名>` 确认服务存活；`adb logcat | grep Overlay` 查看异常。
 
 ### 圆点不显示在其他 App 上方
 
@@ -412,6 +447,9 @@ powershell -ExecutionPolicy Bypass -File replace_icons.ps1
 cd android; .\gradlew assembleRelease
 & "$env:LOCALAPPDATA\Android\Sdk\build-tools\34.0.0\aapt.exe" dump badging android\app\build\outputs\apk\release\app-release.apk | Select-String "package"
 
+# ===== 算法验证（无需真机，改算法后必跑）=====
+bash tools/verify/run.sh
+
 # ===== Git 常用 =====
 git add <files>
 git commit -m "feat/fix/docs: 中文描述"
@@ -452,6 +490,9 @@ tsconfig.json              # TypeScript 配置
 index.ts                   # 入口
 App.tsx                    # 主组件
 src/                       # 所有 RN 代码
+native/android/            # 原生 Kotlin 源码（8 个文件，必须入库）⭐
+plugins/                   # Config Plugin（prebuild 注入原生层）⭐
+tools/verify/              # 算法验证台（JVM 运行，无需真机）
 assets/                    # 图标资源
 release.ps1                # 一键发布脚本
 generate_icons.ps1         # 图标生成
