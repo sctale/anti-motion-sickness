@@ -43,6 +43,11 @@
 
 - README 新增「与行业方案对标」表；AGENTS 新增算法设计要点与验证命令；采样率、圆点布局等描述全部更新。
 
+### ⚖️ 许可
+
+- 修正 [`LICENSE`](./LICENSE) 版权归属：原为 Expo 模板自带的 `Copyright (c) 2015-present 650 Industries, Inc. (aka Expo)`，改为 `Copyright (c) 2026 sctale`。
+- `package.json` 补充 `"license": "MIT"` 字段。
+
 ---
 
 ## [0.2.2] - 2026-06-21

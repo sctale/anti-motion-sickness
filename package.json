@@ -1,6 +1,7 @@
 {
   "name": "anti-car-sickness-rn",
   "version": "0.3.0",
+  "license": "MIT",
   "main": "index.ts",
   "dependencies": {
     "expo": "~56.0.8",
