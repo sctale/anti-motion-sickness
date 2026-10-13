@@ -130,11 +130,15 @@ bash tools/verify/run.sh
 ```
 
 ```bash
-# GitHub Actions 出包（仅手动触发，绑定当前 app.json 版本号）
+# GitHub Actions 出包（方式1：手动触发，版本号取自 app.json）
 gh workflow run android-release.yml
+
+# GitHub Actions 出包（方式2：推送标签触发，版本号取自标签）
+git push origin v0.3.0
 ```
 
 > 工作流使用 debug 签名（与本地 release 构建一致），仅用于真机测试安装，不可上架应用商店。
+> 若该版本 Release 已带 APK（例如已用 `release.ps1` 本地发布），工作流会自动跳过，避免两套 debug 签名互相覆盖。
 
 完整发布流程详见 [AGENTS.md](./AGENTS.md)。
 

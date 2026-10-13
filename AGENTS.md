@@ -186,7 +186,7 @@ bash tools/verify/run.sh
 |------|------|
 | 首选构建环境 | 开发者本地 Windows + Android SDK |
 | 本地构建 | `npx expo prebuild` + `gradlew assembleRelease`（`release.ps1` 一键完成） |
-| GitHub 构建 | [`.github/workflows/android-release.yml`](./.github/workflows/android-release.yml)（**仅 `workflow_dispatch` 手动触发**，无 push 自动触发，不消耗配额） |
+| GitHub 构建 | [`.github/workflows/android-release.yml`](./.github/workflows/android-release.yml)：**手动触发**（`workflow_dispatch`）或**推送 `v*` 标签**触发；普通 push 不触发；若该版本 Release 已带 APK 则自动跳过（避免本地/CI 两套 debug 签名互相覆盖） |
 | 发布方式 | `gh release upload` / 工作流内自动 `gh release create` |
 | 测试方式 | 用户下载 APK 真机测试 |
 
@@ -448,9 +448,11 @@ cd android; .\gradlew assembleRelease
 bash tools/verify/run.sh
 
 # ===== GitHub Actions 出包（本地无 Android SDK 时）=====
-gh workflow run android-release.yml          # 手动触发构建 + 发布 Release
+gh workflow run android-release.yml          # 方式1：手动触发（版本号取自 app.json）
+git push origin v0.3.0                       # 方式2：推送标签触发（版本号取自标签）
 gh run watch                                 # 观察进度
 gh run view --log-failed                     # 失败时看日志
+gh release download v0.3.0                   # 下载 APK
 
 # ===== Git 常用 =====
 git add <files>

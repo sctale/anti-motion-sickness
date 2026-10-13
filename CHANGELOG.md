@@ -41,8 +41,12 @@
 
 ### 🚀 构建
 
-- 新增 GitHub Actions 工作流 [`android-release.yml`](./.github/workflows/android-release.yml)：**仅手动触发**（`workflow_dispatch`，不随 push 自动运行），构建 Release APK → 校验 versionName 与 app.json 一致 → 从 CHANGELOG 生成发布说明 → 自动创建/更新 GitHub Release。
-- `.gitignore` 解除 `.github/workflows/` 屏蔽（仅允许该手动工作流），其余 CI 配置继续忽略。
+- 新增 GitHub Actions 工作流 [`android-release.yml`](./.github/workflows/android-release.yml)：
+  - **触发方式**：`workflow_dispatch` 手动触发，或推送 `v*` 标签触发；普通 push 不触发（不消耗配额）
+  - **流程**：装依赖 → `tsc` 检查 → `expo prebuild` → 校验原生层注入 → `gradlew assembleRelease` → 校验 APK versionName 与版本号一致 → 上传 artifact → 从 CHANGELOG 生成说明并创建/更新 GitHub Release
+  - **守卫**：若该版本 Release 已附带 APK（例如已用 `release.ps1` 本地发布），自动跳过构建，避免本地/CI 两套 debug 签名互相覆盖
+  - **环境**：ubuntu-latest + Node 20 + JDK 17（AGP 8.12 / Gradle 9.3.1）
+- `.gitignore` 解除 `.github/workflows/` 屏蔽（仅允许该工作流），其余 CI 配置继续忽略。
 
 ### 📜 文档同步
 
