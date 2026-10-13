@@ -176,27 +176,24 @@ bash tools/verify/run.sh
 
 ---
 
-## 🚀 一键发布流程（推荐）
+## 🚀 发布流程
 
 ### 📌 构建策略
 
-**本项目全部本地构建，不使用 GitHub Actions / CI。**
+**默认本地构建（Windows + Android SDK）；GitHub Actions 仅保留「手动触发」的 APK 构建工作流。**
 
 | 项目 | 策略 |
 |------|------|
-| 构建环境 | 开发者本地 Windows + Android SDK |
-| APK 构建 | `npx expo prebuild` + `gradlew assembleRelease` |
-| 发布方式 | `gh release upload` 上传到 GitHub Release |
+| 首选构建环境 | 开发者本地 Windows + Android SDK |
+| 本地构建 | `npx expo prebuild` + `gradlew assembleRelease`（`release.ps1` 一键完成） |
+| GitHub 构建 | [`.github/workflows/android-release.yml`](./.github/workflows/android-release.yml)（**仅 `workflow_dispatch` 手动触发**，无 push 自动触发，不消耗配额） |
+| 发布方式 | `gh release upload` / 工作流内自动 `gh release create` |
 | 测试方式 | 用户下载 APK 真机测试 |
-| CI/CD | **不使用** GitHub Actions（节省 Actions 时间和 storage） |
-| 自动化 | `.github/workflows/` 已在 .gitignore 中屏蔽 |
 
-理由：
-- 本项目为 Android 原生 + RN 混合，构建环境依赖 Windows 上的 Android SDK + Gradle，CI 配置复杂
-- 发布频率低，本地一键脚本 `release.ps1` 已足够
-- 避免 GitHub Actions 配额和存储消耗
+何时用 GitHub 构建：本地没有 Android SDK / Gradle 环境（如纯云端开发）时，用 Actions 出包。
+**注意**：工作流使用 debug 签名（与本地一致，仅够真机测试安装，不可上架应用商店）；签名密钥不落库。
 
-**真机测试策略**：本地构建 APK → 上传 GitHub Release → 用户手机真机测试。不再使用 AVD 模拟器。
+**真机测试策略**：构建 APK（本地或 Actions）→ 上传 GitHub Release → 用户手机真机测试。
 
 ### 1. 一键发布到 GitHub
 
@@ -450,6 +447,11 @@ cd android; .\gradlew assembleRelease
 # ===== 算法验证（无需真机，改算法后必跑）=====
 bash tools/verify/run.sh
 
+# ===== GitHub Actions 出包（本地无 Android SDK 时）=====
+gh workflow run android-release.yml          # 手动触发构建 + 发布 Release
+gh run watch                                 # 观察进度
+gh run view --log-failed                     # 失败时看日志
+
 # ===== Git 常用 =====
 git add <files>
 git commit -m "feat/fix/docs: 中文描述"
@@ -493,6 +495,7 @@ src/                       # 所有 RN 代码
 native/android/            # 原生 Kotlin 源码（8 个文件，必须入库）⭐
 plugins/                   # Config Plugin（prebuild 注入原生层）⭐
 tools/verify/              # 算法验证台（JVM 运行，无需真机）
+.github/workflows/         # 手动触发的 APK 构建工作流（唯一允许的 CI 文件）
 assets/                    # 图标资源
 release.ps1                # 一键发布脚本
 generate_icons.ps1         # 图标生成
@@ -504,7 +507,7 @@ LICENSE                    # MIT
 
 ```
 node_modules/              # npm 包
-android/                   # Expo prebuild 产物
+/android/                  # Expo prebuild 产物（根锚定，勿写成 android/，否则会误吞 native/android）
 .gradle-cache/             # Gradle 缓存
 .expo/                     # Expo 缓存
 dist/, web-build/          # 构建输出

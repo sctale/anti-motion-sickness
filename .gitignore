@@ -82,8 +82,8 @@ AGENTS*.md
 .claude/
 CLAUDE.md
 
-# CI/CD - 本项目不使用 GitHub Actions，全部本地构建
-.github/workflows/
+# CI/CD - 默认无自动 CI（本地构建为主）
+# 例外：.github/workflows/android-release.yml 为「手动触发」的 APK 构建工作流，不绑定 push
 .github/actions/
 .circleci/
 .travis.yml

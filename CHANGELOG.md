@@ -39,6 +39,11 @@
 
 - 新增 [`tools/verify/`](./tools/verify/) 算法验证台：`bash tools/verify/run.sh` 在 JVM 上以合成传感器数据回归 11 个场景、22 项断言（竖握/平放 × 加速/刹车/左转/右转、车头朝东、噪声抑制、自动模式淡入淡出、重力回退、极端限幅），当前全部通过。
 
+### 🚀 构建
+
+- 新增 GitHub Actions 工作流 [`android-release.yml`](./.github/workflows/android-release.yml)：**仅手动触发**（`workflow_dispatch`，不随 push 自动运行），构建 Release APK → 校验 versionName 与 app.json 一致 → 从 CHANGELOG 生成发布说明 → 自动创建/更新 GitHub Release。
+- `.gitignore` 解除 `.github/workflows/` 屏蔽（仅允许该手动工作流），其余 CI 配置继续忽略。
+
 ### 📜 文档同步
 
 - README 新增「与行业方案对标」表；AGENTS 新增算法设计要点与验证命令；采样率、圆点布局等描述全部更新。

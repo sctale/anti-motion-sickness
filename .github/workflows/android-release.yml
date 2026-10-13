@@ -1,0 +1,114 @@
+name: Android Release APK
+
+# 仅手动触发：不绑定 push，避免消耗 Actions 配额（见 AGENTS.md「构建策略」）。
+# 用法：Actions → Android Release APK → Run workflow
+on:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: '构建成功后创建/更新 GitHub Release (vX.Y.Z)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: TypeScript 检查
+        run: npx tsc --noEmit
+
+      - name: Prebuild（生成 android/ 并注入原生层）
+        run: npx expo prebuild --platform android --no-install
+
+      - name: 校验原生层注入结果
+        run: |
+          set -e
+          KT_DIR=android/app/src/main/java/com/anonymous/anticarsicknessrn
+          test -f "$KT_DIR/OverlayService.kt"
+          test -f "$KT_DIR/MotionCueEngine.kt"
+          test -f "$KT_DIR/RotationMath.kt"
+          grep -q "add(OverlayPackage())" "$KT_DIR/MainApplication.kt"
+          grep -q "OverlayService" android/app/src/main/AndroidManifest.xml
+          test -f android/app/src/main/res/drawable/ic_stat_motion.xml
+          echo "原生层注入校验通过"
+
+      - name: 构建 Release APK
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: 读取版本号并校验 APK
+        id: meta
+        run: |
+          set -e
+          VERSION=$(node -p "require('./app.json').expo.version")
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [ -z "$ANDROID_HOME" ]; then export ANDROID_HOME="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"; fi
+          AAPT=$(ls -d "$ANDROID_HOME"/build-tools/*/aapt 2>/dev/null | tail -1)
+
+          ls -lh "$APK"
+          "$AAPT" dump badging "$APK" | grep "^package:" | tee /tmp/badging.txt
+          grep -q "versionName='$VERSION'" /tmp/badging.txt || {
+            echo "::error::APK versionName 与 app.json ($VERSION) 不一致"; exit 1;
+          }
+          cp "$APK" "anti-motion-sickness-v$VERSION.apk"
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: anti-motion-sickness-v${{ steps.meta.outputs.version }}-apk
+          path: anti-motion-sickness-v*.apk
+          retention-days: 30
+
+      - name: 从 CHANGELOG 生成发布说明
+        run: |
+          set -e
+          VERSION="${{ steps.meta.outputs.version }}"
+          { echo "# v$VERSION"; echo; echo "> 防晕车助手 Android Release APK（debug 签名，供真机测试）"; echo; } > /tmp/notes.md
+          awk -v v="$VERSION" '$0 ~ "^## \\["v"\\]" {flag=1; next} /^## \[/ {flag=0} flag' CHANGELOG.md >> /tmp/notes.md
+          echo "----- 发布说明 -----"; cat /tmp/notes.md
+
+      - name: 创建/更新 GitHub Release
+        if: ${{ inputs.publish_release }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="v${{ steps.meta.outputs.version }}"
+          FILE="anti-motion-sickness-$TAG.apk"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，覆盖 APK"
+            gh release upload "$TAG" "$FILE#anti-motion-sickness-$TAG.apk" --clobber
+          else
+            echo "创建 Release $TAG"
+            gh release create "$TAG" "$FILE#anti-motion-sickness-$TAG.apk" \
+              --title "$TAG" \
+              --notes-file /tmp/notes.md \
+              --target "$GITHUB_SHA"
+          fi
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"

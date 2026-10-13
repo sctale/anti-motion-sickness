@@ -111,21 +111,30 @@ bash tools/verify/run.sh
 4. 启动 App → 选择"启动 Vehicle Motion"或"启动乘车检测"
 5. **首次启动**：授予"显示在其他应用上层"权限
 6. 返回 App → 点击"▶ 启动"
-7. **观察**：圆点出现在屏幕上下边缘
-8. **摇晃手机**：圆点随运动方向移动
+7. **观察**：圆点出现在屏幕**左右两侧**
+8. **开车转弯 / 加速 / 刹车**：圆点随之左右移动、上下流动
 9. **切换到微信/浏览器**：圆点仍然显示，覆盖在其他 App 上
+
+> 默认开启「自动模式」：仅在检测到车辆运动时显示圆点，静止约 10 秒后淡出。
 
 ### 开发者：构建 + 发布
 
-> **本项目全部本地构建，不使用 GitHub Actions / CI**（节省 Actions 配额和 storage）。所有发布通过 `release.ps1` 一键脚本完成。
+> **默认本地构建**（Windows + Android SDK），`release.ps1` 一键完成；本地无构建环境时可用**手动触发的 GitHub Actions 工作流**出包。
 
-```bash
-# 一键发布（升级 patch 版本号 + prebuild + 构建 + 上传 GitHub Release）
+```powershell
+# 本地一键发布（升级 patch 版本号 + prebuild + 构建 + 上传 GitHub Release）
 .\release.ps1
 
 # 升级次版本号
 .\release.ps1 -BumpType minor
 ```
+
+```bash
+# GitHub Actions 出包（仅手动触发，绑定当前 app.json 版本号）
+gh workflow run android-release.yml
+```
+
+> 工作流使用 debug 签名（与本地 release 构建一致），仅用于真机测试安装，不可上架应用商店。
 
 完整发布流程详见 [AGENTS.md](./AGENTS.md)。
 
