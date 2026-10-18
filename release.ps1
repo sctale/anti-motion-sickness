@@ -328,6 +328,17 @@ if (-not $SkipPrebuild -and -not $UploadOnly) {
                 throw ("prebuild 后仍存在陈旧原生文件: $($extra -join ', ')（应由 plugins/withOverlayModule.js 清理）")
             }
             Write-Success "原生源码注入完整，无陈旧文件残留"
+
+            # mod 在「复用 android/ 目录」时容易变成空操作（历史上就踩过：
+            # OverlayPackage 已注册 → 提前 return → 崩溃留存注入没执行）。
+            # 所以注入结果必须实测，不能只看插件跑完了。
+            $app = Get-Content (Join-Path $javaDir "MainApplication.kt") -Raw
+            foreach ($needle in @("add(OverlayPackage())", "CrashCapture.install(this)")) {
+                if ($app -notmatch [regex]::Escape($needle)) {
+                    throw "MainApplication.kt 缺少注入项：$needle（Config Plugin 未生效，构建中止）"
+                }
+            }
+            Write-Success "MainApplication 注入项已校验（OverlayPackage / CrashCapture）"
         } else {
             Write-Warn "未在原生产工程中找到 OverlayService.kt，Config Plugin 可能未生效"
         }

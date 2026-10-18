@@ -24,6 +24,9 @@ export const ACTIVITY_HISTORY_SIZE = 10;
 export const ACTIVITY_IN_VEHICLE_CONFIDENCE = 60;
 export const ACTIVITY_STILL_CONFIDENCE = 30;
 
+// ===== 崩溃留存（原生 CrashCapture 与 JS ErrorBoundary 共用同一个键）=====
+export const LAST_CRASH_KEY = 'last_crash';
+
 // ===== 震动反馈（useVibrationService）=====
 export const VIBRATION_LOW_INTERVAL_MS = 3000;
 export const VIBRATION_MEDIUM_INTERVAL_MS = 2000;

@@ -11,6 +11,9 @@ import {
 import Constants from 'expo-constants';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { OverlayServiceProvider, useOverlayServiceContext } from './src/hooks/OverlayServiceContext';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { useStringPreference } from './src/hooks/usePreference';
+import { LAST_CRASH_KEY } from './src/utils/constants';
 import { VehicleMotionScreen } from './src/screens/VehicleMotionScreen';
 import { CarDetectionScreen } from './src/screens/CarDetectionScreen';
 
@@ -21,11 +24,40 @@ const APP_VERSION = Constants.expoConfig?.version ?? '0.0.0';
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <OverlayServiceProvider>
-        <RootNavigator />
-      </OverlayServiceProvider>
-    </SafeAreaProvider>
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <OverlayServiceProvider>
+          <RootNavigator />
+        </OverlayServiceProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
+  );
+}
+
+/**
+ * 上次启动的崩溃现场。
+ *
+ * 原生 CrashCapture 与 JS ErrorBoundary 都写同一个偏好键，所以这里一次读出来就能覆盖两类崩溃。
+ * 「点图标就闪退」在没有真机日志时是没法排查的 —— 让 App 自己把原因显示在首页，
+ * 用户截一张图就等于交出了 stacktrace。
+ */
+function CrashReportCard() {
+  const [crash, setCrash] = useStringPreference(LAST_CRASH_KEY, '');
+  if (!crash) return null;
+
+  return (
+    <View style={styles.crashCard}>
+      <Text style={styles.crashTitle}>⚠️ 上次启动发生了崩溃</Text>
+      <ScrollView style={styles.crashLog} nestedScrollEnabled>
+        <Text style={styles.crashText}>{crash}</Text>
+      </ScrollView>
+      <Text style={styles.crashHint}>
+        把上面这段截图发到 GitHub Issue，就能直接定位原因（比「闪退」两个字有用得多）。
+      </Text>
+      <TouchableOpacity style={styles.crashClear} onPress={() => setCrash('')}>
+        <Text style={styles.crashClearText}>已知晓，清除提示</Text>
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -54,6 +86,8 @@ function RootNavigator() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        <CrashReportCard />
+
         <FeatureCard
           icon="🚗"
           title="Vehicle Motion"
@@ -166,6 +200,50 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingBottom: 20,
+  },
+  crashCard: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  crashTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#B91C1C',
+    marginBottom: 10,
+  },
+  crashLog: {
+    maxHeight: 180,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+  },
+  crashText: {
+    fontSize: 11,
+    lineHeight: 17,
+    color: '#7F1D1D',
+    fontFamily: 'monospace',
+  },
+  crashHint: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#991B1B',
+    marginBottom: 12,
+  },
+  crashClear: {
+    backgroundColor: '#B91C1C',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  crashClearText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
   },
   featureCard: {
     backgroundColor: '#fff',

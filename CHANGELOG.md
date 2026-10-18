@@ -1,5 +1,70 @@
 # 更新日志 (Changelog)
 
+## [0.3.8] - 2026-10-18
+
+针对「启动直接闪退」的一版：**图标换成素描简图**，并把「崩溃原因看不见」这个根本障碍解决掉。
+
+### ⚠️ 关于闪退的诚实说明
+
+本机无法复现：没有连接真机，而 AVD `test-android-36` 在这台机器上四次启动都失败
+（提权的父进程认不到自己派生的 QEMU 子进程，误报 "too many emulator instances" 后自杀，
+换 `-gpu swiftshader_indirect / guest / off` 都一样）。
+静态排查已排除几类常见原因：manifest 声明的 `MainActivity` / `MainApplication` /
+`OverlayService` / `MotionCueTileService` 四个组件在 DEX 里都存在（`apkanalyzer dex packages`）、
+`assets/index.android.bundle` 存在且是最新代码（Hermes 字节码里能查到 0.3.5+ 才有的
+`canRequestAddTile`）、APK 16KB 对齐通过。
+所以这一版先把**现场**带回来，而不是宣称已修好。
+
+### ✨ 新增：崩溃现场留存（下次启动直接显示原因）
+
+- [`native/android/CrashCapture.kt`](./native/android/CrashCapture.kt)：`Application.onCreate`
+  装一个默认未捕获异常处理器，把线程名 + 异常类型 + 堆栈写进设置存储，然后再交回系统处理。
+  **用 `commit()` 同步落盘** —— `apply()` 是异步的，进程正在死掉时那次写入很可能丢，等于白留
+  （`SettingsStore.setStringSync`）。
+- JS 侧 `src/components/ErrorBoundary.tsx`：根级错误边界，渲染期崩溃不再直接闪退，
+  而是留在屏幕上看得到；同时写进同一个键（`last_crash`）。
+- 首页新增崩溃卡片：显示上次的堆栈 + 「清除并继续」，并提示截图发到 Issue。
+- 不新增原生桥方法：崩溃走 `getStringPref/setStringPref` 同一份存储、同一个读接口。
+
+### 🐛 修复
+
+- **Config Plugin 的 mod 在复用 `android/` 目录时会静默变成空操作**：
+  `withOverlayPackage` 开头是 `if (contents.includes('OverlayPackage()')) return cfg`，
+  而 `android/` 是 prebuild 复用目录、早就注册过了 —— 结果写在它后面的
+  `CrashCapture.install` 注入**永远不会执行**。改成两个独立判断 + 只在真有改动时写回，
+  并实测两次 prebuild 后注入项恰好出现 1 次（幂等）。
+- **`release.ps1` 新增注入校验**：prebuild 后直接检查 `MainApplication.kt` 是否含
+  `add(OverlayPackage())` 与 `CrashCapture.install(this)`，缺失即中止构建。
+  注入类问题不能只看「插件跑完了」。
+- **`OverlayModule` 读取容错**：新架构（bridgeless）下访问未注册模块可能直接抛错，
+  而这段代码在 import 阶段求值 —— 一旦抛出就是「点图标立刻闪退、连一屏错误都看不到」。
+  现在包在 try/catch 里，失败降级为「当前平台不支持」。
+- 插件清理陈旧文件时不再谎报：文件本来不存在就不打印「已清理」。
+
+### 🎨 图标：改为素描简图（铅笔线描 + 排线）
+
+`tools/icons/render.mjs` 整个重写为「纸面 + 石墨线稿」：暖白纸纹、两遍带抖动的主线、
+只用排线表现明暗，主体是**一辆侧视小车 + 左右各 5 个圆点**（正是产品在屏幕两侧画的东西，
+概念自洽）。固定种子保证重跑逐像素一致。
+
+生成过程中修掉三个真实缺陷（都是看图自查发现的）：
+
+- 折线拼接留下 `L L` 非法命令序列 → librsvg 直接丢弃整条 path，
+  表现为**车身和车窗根本没画**、只有车轮和圆点；
+- `dotPositions()` 漏了 `r` 字段 → `r="NaN"` → 圆点整列消失；
+- 地面排线没裁剪 → 斜穿车身，像车身上划了几道。
+
+并加了两道生成期自检：主体越出自适应图标安全区（半径 300px）即报错、
+path 里出现 `NaN`/`Infinity`/非法命令序列即报错；同时输出遮罩预览与 48~180px 尺寸预览，
+确认缩小后仍能认出「车 + 两列点」（靠实心的车轮与车窗承担小尺寸识别度）。
+
+### 🧪 验证
+
+- `tsc --noEmit` 通过；`tools/verify/run.sh` 14 场景 31 断言通过；
+  `release.ps1` 语法解析 0 错误（UTF-8 BOM 保持）；APK 16KB 对齐通过。
+
+---
+
 ## [0.3.7] - 2026-10-18
 
 第四轮：对前三轮自己写的改动做一轮双轴复查，修掉复查中发现的真实竞态。

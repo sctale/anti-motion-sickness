@@ -45,11 +45,27 @@ export interface OverlayNativeModule {
   setStringPref(key: string, value: string): Promise<boolean>;
 }
 
-/** 非 Android、或未注入原生模块时为 null */
-export const OverlayModule: OverlayNativeModule | null =
-  Platform.OS === 'android'
-    ? ((NativeModules as { OverlayModule?: OverlayNativeModule }).OverlayModule ?? null)
-    : null;
+/**
+ * 安全解析原生模块。
+ *
+ * 必须在 import 阶段就不抛错：新架构（bridgeless）下访问未注册的原生模块，
+ * NativeModules 的 Proxy 可能直接抛 invariant，而不是返回 undefined。
+ * 这段代码在 App 启动时被求值，一旦抛出就是「点图标立刻闪退」，
+ * 连一屏错误信息都看不到。吞掉后界面会走「当前平台不支持」的降级路径。
+ */
+function resolveOverlayModule(): OverlayNativeModule | null {
+  if (Platform.OS !== 'android') return null;
+  try {
+    const mod = (NativeModules as Record<string, unknown>).OverlayModule;
+    return (mod as OverlayNativeModule | undefined) ?? null;
+  } catch (error) {
+    console.warn('读取原生模块 OverlayModule 失败，悬浮窗功能将不可用：', error);
+    return null;
+  }
+}
+
+/** 非 Android、原生模块未注入、或读取时抛错 —— 一律为 null */
+export const OverlayModule: OverlayNativeModule | null = resolveOverlayModule();
 
 /** 原生侧 reject 的错误码，见 OverlayModule.kt */
 export const OVERLAY_ERRORS = {

@@ -99,8 +99,10 @@ function withOverlayKotlinSources(config) {
       ]);
       for (const stale of staleCandidates) {
         if (!stale.endsWith('.kt') || current.has(stale)) continue;
+        const target = path.join(destDir, stale);
+        if (!fs.existsSync(target)) continue; // 不存在就别谎报「已清理」
         try {
-          await fs.promises.rm(path.join(destDir, stale), { force: true });
+          await fs.promises.rm(target, { force: true });
           console.log(`[withOverlayModule] 已清理陈旧原生文件: ${stale}`);
         } catch (e) {
           console.warn(
@@ -228,40 +230,66 @@ function withOverlayPackage(config) {
 
   return withMainApplication(config, (cfg) => {
     let contents = cfg.modResults.contents;
-    if (contents.includes('OverlayPackage()')) {
-      return cfg;
-    }
+    let changed = false;
 
-    const ownPackageMatch = contents.match(/^package\s+([A-Za-z0-9_.]+)/m);
-    const ownPackage = ownPackageMatch ? ownPackageMatch[1] : null;
-    if (ownPackage !== packageName && !contents.includes(`import ${packageName}.OverlayPackage`)) {
-      contents = contents.replace(
-        /(^package [^\n]+\n)/m,
-        `$1\nimport ${packageName}.OverlayPackage\n`
+    // 1) 崩溃现场留存：在 Application.onCreate 最前面装一个默认异常处理器。
+    //    「点图标就闪退」且手机不在开发者手边时，这是唯一能把原因带回来的办法。
+    //    必须独立判断：以前它写在「OverlayPackage 已注册就 return」之后，
+    //    而复用的 android/ 目录里早就注册过了，于是这段永远不执行。
+    if (!contents.includes('CrashCapture.install(this)')) {
+      const withCrash = contents.replace(
+        /(override fun onCreate\(\) \{[\r\n]+\s*super\.onCreate\(\)[\r\n]+)/,
+        (match) => `${match}    CrashCapture.install(this)\n`
       );
-    }
-
-    const applyPattern = /(PackageList\(this\)\.packages\.apply\s*\{)/;
-    if (applyPattern.test(contents)) {
-      contents = contents.replace(
-        applyPattern,
-        `$1\n          add(OverlayPackage())`
-      );
-    } else {
-      const listPattern = /(PackageList\(this\)\.packages)(?!\s*\.apply)/;
-      if (listPattern.test(contents)) {
-        contents = contents.replace(
-          listPattern,
-          'PackageList(this).packages.toMutableList().apply { add(OverlayPackage()) }'
+      if (withCrash === contents) {
+        console.warn(
+          '[withOverlayModule] 未能在 MainApplication.onCreate 注入 CrashCapture.install，崩溃现场不会被留存'
         );
       } else {
-        console.warn(
-          '[withOverlayModule] 未能在 MainApplication.kt 中找到 getPackages()，请手动注册 OverlayPackage'
-        );
+        contents = withCrash;
+        changed = true;
       }
     }
 
-    cfg.modResults.contents = contents;
+    // 2) 注册 OverlayPackage
+    if (!contents.includes('OverlayPackage()')) {
+      const ownPackageMatch = contents.match(/^package\s+([A-Za-z0-9_.]+)/m);
+      const ownPackage = ownPackageMatch ? ownPackageMatch[1] : null;
+      if (
+        ownPackage !== packageName &&
+        !contents.includes(`import ${packageName}.OverlayPackage`)
+      ) {
+        contents = contents.replace(
+          /(^package [^\n]+\n)/m,
+          `$1\nimport ${packageName}.OverlayPackage\n`
+        );
+      }
+
+      const applyPattern = /(PackageList\(this\)\.packages\.apply\s*\{)/;
+      if (applyPattern.test(contents)) {
+        contents = contents.replace(
+          applyPattern,
+          `$1\n          add(OverlayPackage())`
+        );
+      } else {
+        const listPattern = /(PackageList\(this\)\.packages)(?!\s*\.apply)/;
+        if (listPattern.test(contents)) {
+          contents = contents.replace(
+            listPattern,
+            'PackageList(this).packages.toMutableList().apply { add(OverlayPackage()) }'
+          );
+        } else {
+          console.warn(
+            '[withOverlayModule] 未能在 MainApplication.kt 中找到 getPackages()，请手动注册 OverlayPackage'
+          );
+        }
+      }
+      changed = true;
+    }
+
+    if (changed) {
+      cfg.modResults.contents = contents;
+    }
     return cfg;
   });
 }

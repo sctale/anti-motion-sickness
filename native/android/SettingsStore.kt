@@ -79,4 +79,18 @@ object SettingsStore {
             .putString(key, value)
             .apply()
     }
+
+    /**
+     * 同步落盘版。
+     *
+     * 崩溃留存必须在进程死掉之前写进去：apply() 只是把改动放到内存、
+     * 由后台线程异步落盘，紧接着的 uncaughtException 终止进程时很可能什么都没留下。
+     */
+    fun setStringSync(context: Context, key: String, value: String) {
+        context.applicationContext
+            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(key, value)
+            .commit()
+    }
 }
