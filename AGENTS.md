@@ -69,8 +69,10 @@ native/android/
 ├── OverlayPackage.kt        # RN Package 注册 ⭐
 ├── MotionCueTileService.kt  # Quick Settings 磁贴：下拉栏直接开关圆点 ⭐
 ├── SettingsStore.kt         # SharedPreferences：自动模式 / 灵敏度 / 界面偏好的唯一真源 ⭐
+├── CrashCapture.kt          # 未捕获异常落盘到 last_crash：没有真机日志时靠它拿堆栈 ⭐
 ├── SensorFusion.kt          # 世界坐标系融合、重力扣除回退、世界垂直轴偏航角速度 ⭐
 ├── MotionCueEngine.kt       # 姿态自适应映射、死区、临界阻尼弹簧、迟滞、灵敏度 ⭐
+├── SamplingPolicy.kt        # 静止降档 / 运动回档的采样强度策略（纯逻辑，可在 JVM 验证）⭐
 └── RotationMath.kt          # 旋转矢量 → 旋转矩阵（纯数学，与 Android 约定一致）
 
 # prebuild 后会被注入到：
@@ -137,6 +139,10 @@ src/
    捕获 → 记 `REASON_*` → 体面停止，绝不无声吞帧，也绝不让异常穿透到 Looper。
    `OverlayModule` 侧必须把已记录的原因如实 `reject`，否则会被轮询超时分支吞成「启动超时」，
    把真实病根（省电策略、通知被禁）盖掉。
+9. **采样档位只在传感器线程上改，且改一次要付一次「注销+重注册」的代价**
+   （`SensorManager` 没有修改采样率的公开 API）。`SamplingPolicy` 是纯逻辑、可在 JVM 验证；
+   `OverlayService` 里的切换必须 `handler.post` 出去，不能在 `onSensorChanged` 回调里直接注销自己。
+   切换失败要整体重建注册并回到最高档 —— 宁可多耗电，也不能让传感器悄悄全掉、圆点冻住。
 
 ### 关键参数
 
@@ -150,8 +156,8 @@ src/
 | 死区 | 0.12 m/s²，0.015 rad/s | 抑制静止噪声 |
 | 弹簧 | ω=12 rad/s，ζ=1.0 | 无过冲，约 0.25s 跟上 |
 | 自动模式（迟滞） | 进入 0.30 m/s² 或 0.06 rad/s，需连续 600ms；维持 0.12 m/s² 或 0.02 rad/s；静止 10s 淡出（0.8s） | 短暂晃动不闪现；匀速巡航的弱信号不会闪断 |
-| 计算与重绘帧率 | 合并到 60Hz | 传感器按 GAME 采样，回调跑在独立 HandlerThread |
-| 采样率 | SENSOR_DELAY_GAME | ~50-100Hz，息屏暂停传感器并暂停重绘 |
+| 计算与重绘帧率 | 合并到 60Hz | 传感器按当前档位采样，回调跑在独立 HandlerThread |
+| 采样率（自适应） | 有运动 GAME(~50-100Hz) / 静止 20s → UI(~66ms) / 静止 120s → NORMAL(~200ms) | `SamplingPolicy`；强度达到 0.08 立刻回 GAME。息屏一律注销传感器 |
 | 窗口类型 | TYPE_APPLICATION_OVERLAY | 系统级悬浮窗，不拦截触摸 |
 
 > 运动学参数定义于 [`native/android/MotionCueEngine.kt`](./native/android/MotionCueEngine.kt) 的 `CueConfig`；
@@ -166,8 +172,8 @@ src/
 bash tools/verify/run.sh
 ```
 
-覆盖 14 个场景：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式淡入淡出、重力回退、极端限幅、倾斜姿态下纯重力不泄漏、转弯动态范围（防饱和）、自动模式迟滞。共 31 项断言。
-修改 `SensorFusion.kt` / `MotionCueEngine.kt` / `RotationMath.kt` 后必须全部断言通过。
+覆盖 16 组场景（含 2 项姿态矩阵自检）：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式淡入淡出、重力回退、极端限幅、倾斜姿态下纯重力不泄漏、转弯动态范围（防饱和）、自动模式迟滞、静止降档/运动回档、档位切换不抖动。共 45 项断言。
+修改 `SensorFusion.kt` / `MotionCueEngine.kt` / `RotationMath.kt` / `SamplingPolicy.kt` 后必须全部断言通过。
 
 ### AndroidManifest 关键配置
 
@@ -573,7 +579,7 @@ tsconfig.json              # TypeScript 配置
 index.ts                   # 入口
 App.tsx                    # 主组件
 src/                       # 所有 RN 代码
-native/android/            # 原生 Kotlin 源码（10 个文件，必须入库）⭐
+native/android/            # 原生 Kotlin 源码（12 个文件，必须入库）⭐
 plugins/                   # Config Plugin（prebuild 注入原生层）⭐
 tools/verify/              # 算法验证台（JVM 运行，无需真机）
 assets/                    # 图标资源（源文件由 tools/icons/render.mjs 生成）
