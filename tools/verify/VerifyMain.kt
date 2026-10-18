@@ -9,6 +9,13 @@ package com.anonymous.anticarsicknessrn
  */
 
 private val WORLD_UP = floatArrayOf(0f, 0f, 1f)
+
+/**
+ * 断言一律按 CueConfig 的默认值折算成比例，而不是写死 dp 数字：
+ * 这样重新调参（增益、满行程）时验证台不会假失败，
+ * 同时又能抓住「方向反了」「完全不动」「超出满行程」这类真实回归。
+ */
+private val CFG = MotionCueEngine.CueConfig()
 private var failures = 0
 
 fun main() {
@@ -39,6 +46,8 @@ fun main() {
     scenarioHeadingEast()
     scenarioLimits(upright)
     scenarioTiltedGravityOnly()
+    scenarioTurnDynamicRange(upright)
+    scenarioAutoHysteresis(upright)
 
     println()
     if (failures == 0) {
@@ -55,15 +64,15 @@ private fun scenarioUprightAccelerate(rv: FloatArray) {
     println("\n[场景 1] 竖握 + 车辆加速前进 2 m/s²（期望：圆点向下流动）")
     val out = run(rv, worldAccel = floatArrayOf(0f, 2f, 0f), yawRate = 0f, seconds = 1.5f)
     report(out)
-    check("加速前进 → offsetYdp 为正（向下）", out.offsetYdp > 20f)
-    check("加速前进 → 水平方向基本不动", kotlin.math.abs(out.offsetXdp) < 3f)
+    check("加速前进 → offsetYdp 为正（向下）", out.offsetYdp > 0.5f * CFG.maxOffsetYdp)
+    check("加速前进 → 水平方向基本不动", kotlin.math.abs(out.offsetXdp) < 0.15f * CFG.maxOffsetXdp)
 }
 
 private fun scenarioUprightBrake(rv: FloatArray) {
     println("\n[场景 2] 竖握 + 刹车 2 m/s²（期望：圆点向上流动）")
     val out = run(rv, worldAccel = floatArrayOf(0f, -2f, 0f), yawRate = 0f, seconds = 1.5f)
     report(out)
-    check("刹车 → offsetYdp 为负（向上）", out.offsetYdp < -20f)
+    check("刹车 → offsetYdp 为负（向上）", out.offsetYdp < -0.5f * CFG.maxOffsetYdp)
 }
 
 private fun scenarioUprightTurnLeft(rv: FloatArray) {
@@ -73,7 +82,7 @@ private fun scenarioUprightTurnLeft(rv: FloatArray) {
     println("        · 旧实现读到 gyroZ(设备) = ${fmt(legacyGyroZ)} rad/s")
     val out = run(rv, worldAccel = floatArrayOf(-1.5f, 0f, 0f), yawRate = 0.4f, seconds = 1.5f)
     report(out)
-    check("左转 → offsetXdp 为正（向右）", out.offsetXdp > 20f)
+    check("左转 → offsetXdp 为正（向右）", out.offsetXdp > 0.5f * CFG.maxOffsetXdp)
     check("左转在竖握姿态下旧实现无响应（gyroZ≈0）", kotlin.math.abs(legacyGyroZ) < 0.05f)
 }
 
@@ -81,7 +90,7 @@ private fun scenarioUprightTurnRight(rv: FloatArray) {
     println("\n[场景 4] 竖握 + 右转（偏航 -0.4 rad/s，向心加速度朝东 1.5 m/s²）")
     val out = run(rv, worldAccel = floatArrayOf(1.5f, 0f, 0f), yawRate = -0.4f, seconds = 1.5f)
     report(out)
-    check("右转 → offsetXdp 为负（向左）", out.offsetXdp < -20f)
+    check("右转 → offsetXdp 为负（向左）", out.offsetXdp < -0.5f * CFG.maxOffsetXdp)
 }
 
 private fun scenarioFlatTurnLeft(rv: FloatArray) {
@@ -90,7 +99,7 @@ private fun scenarioFlatTurnLeft(rv: FloatArray) {
     println("        · 旧实现读到 gyroZ(设备) = ${fmt(legacyGyroZ)} rad/s")
     val out = run(rv, worldAccel = floatArrayOf(-1.5f, 0f, 0f), yawRate = 0.4f, seconds = 1.5f)
     report(out)
-    check("左转（平放） → offsetXdp 为正", out.offsetXdp > 20f)
+    check("左转（平放） → offsetXdp 为正", out.offsetXdp > 0.5f * CFG.maxOffsetXdp)
     check("平放姿态下旧实现同样能读到 0.4", legacyGyroZ > 0.35f)
 }
 
@@ -98,7 +107,7 @@ private fun scenarioFlatAccelerate(rv: FloatArray) {
     println("\n[场景 6] 平放 + 加速前进 2 m/s²（期望：圆点向下，与竖握一致）")
     val out = run(rv, worldAccel = floatArrayOf(0f, 2f, 0f), yawRate = 0f, seconds = 1.5f)
     report(out)
-    check("平放加速 → offsetYdp 为正（向下）", out.offsetYdp > 20f)
+    check("平放加速 → offsetYdp 为正（向下）", out.offsetYdp > 0.5f * CFG.maxOffsetYdp)
 }
 
 private fun scenarioNoiseRejection(rv: FloatArray) {
@@ -168,7 +177,7 @@ private fun scenarioGravityFallback(rv: FloatArray) {
     }
     val out = engine.currentOutput()
     report(out)
-    check("加速度计 − 重力 路径可识别前进加速（向下）", out.offsetYdp > 20f)
+    check("加速度计 − 重力 路径可识别前进加速（向下）", out.offsetYdp > 0.5f * CFG.maxOffsetYdp)
 }
 
 private fun scenarioHeadingEast() {
@@ -183,14 +192,14 @@ private fun scenarioHeadingEast() {
 
     val out = run(eastHeading, worldAccel = floatArrayOf(2f, 0f, 0f), yawRate = 0f, seconds = 1.5f)
     report(out)
-    check("车头朝东加速 → 圆点向下（offsetYdp > 20）", out.offsetYdp > 20f)
+    check("车头朝东加速 → 圆点向下", out.offsetYdp > 0.5f * CFG.maxOffsetYdp)
 }
 
 private fun scenarioLimits(rv: FloatArray) {    println("\n[场景 10] 极端输入（加速 8 m/s² + 偏航 1.5 rad/s）")
     val out = run(rv, worldAccel = floatArrayOf(-6f, 8f, 0f), yawRate = 1.5f, seconds = 2f)
     report(out)
-    check("水平位移被限制在 ±40dp 内", kotlin.math.abs(out.offsetXdp) <= 40.01f)
-    check("垂直位移被限制在 ±48dp 内", kotlin.math.abs(out.offsetYdp) <= 48.01f)
+    check("水平位移被限制在满行程内", kotlin.math.abs(out.offsetXdp) <= CFG.maxOffsetXdp + 0.01f)
+    check("垂直位移被限制在满行程内", kotlin.math.abs(out.offsetYdp) <= CFG.maxOffsetYdp + 0.01f)
 }
 
 /**
@@ -237,6 +246,87 @@ private fun scenarioTiltedGravityOnly() {
     check("重力不会被当成车辆运动（水平方向不动）", worstX < 2f)
     check("重力不会被当成车辆运动（垂直方向不动）", worstY < 2f)
     check("纯重力姿态下自动模式保持隐藏", out.alpha < 0.01f)
+}
+
+/**
+ * 场景 13：满行程动态范围（防饱和）。
+ *
+ * 老参数下偏航增益 110dp/(rad/s) + 横向增益 20dp/(m/s²) 两项直接相加，
+ * 一个普通 2.5 m/s² 的转弯单靠横向加速度就能算出 50dp，
+ * 于是缓转、正常转、急转在屏幕上都是「顶到钳位」——完全看不出差别。
+ * 现在两路各自归一到满行程再按权重合成，必须看到单调差异且急转不满钳。
+ */
+private fun scenarioTurnDynamicRange(rv: FloatArray) {
+    println("\n[场景 13] 转弯动态范围（缓转 / 正常 / 急转应能看出差别）")
+
+    data class Sample(val label: String, val yaw: Float, val latMS2: Float)
+    val samples = listOf(
+        Sample("缓转（高速匝道）", 0.12f, 0.8f),
+        Sample("正常转弯", 0.25f, 1.8f),
+        Sample("急转（路口 90°）", 0.50f, 3.2f),
+    )
+
+    val results = samples.map { s ->
+        // 左转：偏航为正，向心加速度指向左侧（世界 X 为西 → 取负）
+        val out = run(rv, worldAccel = floatArrayOf(-s.latMS2, 0f, 0f), yawRate = s.yaw, seconds = 1.5f)
+        println("        · ${s.label}: yaw=${fmt(s.yaw)} rad/s, aLat=${fmt(s.latMS2)} m/s² → offsetXdp=${fmt(out.offsetXdp)}")
+        out.offsetXdp
+    }
+
+    val max = CFG.maxOffsetXdp
+    check("缓转位移明显小于满行程", results[0] < 0.35f * max)
+    check("正常转弯落在中段（既不是不动也不是顶满）", results[1] > 0.30f * max && results[1] < 0.75f * max)
+    check("急转接近但未撞钳位", results[2] > 0.75f * max && results[2] <= max + 0.01f)
+    check("位移随转弯强度单调增加", results[0] < results[1] && results[1] < results[2])
+}
+
+/**
+ * 场景 14：自动模式迟滞。
+ * - 短暂晃动（低于确认窗口）不应让圆点出现；
+ * - 进入运动态后，匀速巡航的弱信号仍要维持显示（否则高速上圆点会忽隐忽现）；
+ * - 真正停下来超过 stillTimeout 才淡出。
+ */
+private fun scenarioAutoHysteresis(rv: FloatArray) {
+    println("\n[场景 14] 自动模式迟滞（短暂晃动不显示 / 巡航弱信号维持 / 停车才淡出）")
+
+    val stillLinear = floatArrayOf(0f, 0f, 0f)
+
+    fun step(fusion: SensorFusion, engine: MotionCueEngine, t: Long, accelWorld: FloatArray): Long {
+        val ts = t + 20L
+        val f = fusion.update(
+            rv, null, deviceFromWorld(rv, accelWorld), null, floatArrayOf(0f, 0f, 0f)
+        )
+        engine.update(f, ts)
+        return ts
+    }
+
+    // A. 300ms 晃动 + 1.2s 静止 → 不应出现
+    val fusion = SensorFusion()
+    val engine = MotionCueEngine()
+    var t = 0L
+    repeat(15) { t = step(fusion, engine, t, floatArrayOf(0f, 0.6f, 0f)) }
+    repeat(60) { t = step(fusion, engine, t, stillLinear) }
+    val afterJiggle = engine.currentOutput()
+    println("        · 300ms 晃动后 alpha=${fmt(afterJiggle.alpha)}")
+    check("短暂晃动不触发圆点（确认窗口生效）", afterJiggle.alpha < 0.05f)
+
+    // B. 2s 明确运动 → 淡入
+    repeat(100) { t = step(fusion, engine, t, floatArrayOf(0f, 2f, 0f)) }
+    val afterMoving = engine.currentOutput()
+    println("        · 2s 运动后 alpha=${fmt(afterMoving.alpha)}")
+    check("持续运动后淡入", afterMoving.alpha > 0.9f)
+
+    // C. 之后 5s 只剩 0.2 m/s²（高于退出阈值、低于进入阈值）→ 必须维持
+    repeat(250) { t = step(fusion, engine, t, floatArrayOf(0f, 0.2f, 0f)) }
+    val duringCruise = engine.currentOutput()
+    println("        · 巡航弱信号 5s 后 alpha=${fmt(duringCruise.alpha)}")
+    check("匀速巡航弱信号不会让圆点消失（迟滞生效）", duringCruise.alpha > 0.9f)
+
+    // D. 彻底静止 12s（超过 stillTimeout）→ 淡出
+    repeat(600) { t = step(fusion, engine, t, stillLinear) }
+    val afterStill = engine.currentOutput()
+    println("        · 静止 12s 后 alpha=${fmt(afterStill.alpha)}")
+    check("真正停车后按时淡出", afterStill.alpha < 0.01f)
 }
 
 // ---------------- 工具 ----------------

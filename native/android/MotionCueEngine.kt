@@ -27,16 +27,27 @@ class MotionCueEngine(
 ) {
 
     data class CueConfig(
-        /** 水平方向最大位移（dp） */
-        val maxOffsetXdp: Float = 40f,
-        /** 垂直方向最大位移（dp） */
+        /**
+         * 横向满行程位移（dp）。
+         *
+         * 必须 ≤ OverlayView 在边缘带内能显示的横向行程
+         * `OverlayView.MAX_SHIFT_X_DP = EDGE_INSET_DP − DOT_RADIUS_DP × RADIUS_MAX_SCALE ≈ 20.4`。
+         * 之前这里是 40dp 而 View 只给到 ±21.5/±30dp，结果左右两列在不同位置撞墙、
+         * 不再像「整组平移」，而且引擎算出的后半段位移被静默裁掉。
+         */
+        val maxOffsetXdp: Float = 20f,
+        /** 纵向满行程位移（dp）；纵向可用空间是整个屏幕高度，不受边缘带限制 */
         val maxOffsetYdp: Float = 48f,
-        /** 偏航角速度 → 位移增益（dp per rad/s） */
-        val yawGainDpPerRadS: Float = 110f,
-        /** 横向加速度 → 位移增益（dp per m/s²） */
-        val lateralGainDpPerMS2: Float = 20f,
-        /** 纵向（前进）加速度 → 位移增益（dp per m/s²），正号表示加速时圆点向下 */
-        val longitudinalGainDpPerMS2: Float = 24f,
+
+        /** 达到满行程所需的偏航角速度 (rad/s)。约等于 30km/h 急打方向的量级 */
+        val yawReferenceRadS: Float = 0.55f,
+        /** 达到满行程所需的横向加速度 (m/s²) */
+        val lateralReferenceMS2: Float = 3.5f,
+        /** 达到满行程所需的纵向加速度 (m/s²) */
+        val longitudinalReferenceMS2: Float = 3.0f,
+        /** 横向通道里偏航角速度的权重，余下权重给横向加速度（两者符号一致） */
+        val yawChannelWeight: Float = 0.65f,
+
         /** 加速度死区（m/s²），抑制静止噪声 */
         val deadbandAccel: Float = 0.12f,
         /** 偏航角速度死区（rad/s） */
@@ -45,11 +56,16 @@ class MotionCueEngine(
         val springOmega: Float = 12f,
         /** 弹簧阻尼比（1.0 = 临界阻尼） */
         val springZeta: Float = 1.0f,
-        /** 自动模式：判定为「运动」的加速度阈值（m/s²） */
-        val motionAccelThreshold: Float = 0.25f,
-        /** 自动模式：判定为「运动」的偏航角速度阈值（rad/s） */
-        val motionYawThreshold: Float = 0.05f,
-        /** 自动模式：静止多久后淡出（秒） */
+
+        /** 自动模式进入「运动中」的阈值（高于此值才开始计时） */
+        val motionAccelEnterMS2: Float = 0.30f,
+        val motionYawEnterRadS: Float = 0.06f,
+        /** 维持「运动中」的阈值（低于此值才开始计时走向淡出）——与进入阈值构成迟滞 */
+        val motionAccelExitMS2: Float = 0.12f,
+        val motionYawExitRadS: Float = 0.02f,
+        /** 连续满足进入阈值多久才认定真的在动（抑制手机被拿起来晃一下的误触发） */
+        val motionConfirmMs: Float = 600f,
+        /** 自动模式：低于退出阈值多久后淡出（秒） */
         val stillTimeoutS: Float = 10f,
         /** 淡入淡出时长（秒） */
         val fadeDurationS: Float = 0.8f
@@ -81,6 +97,8 @@ class MotionCueEngine(
 
     private var lastTimestampMs: Long = 0L
     private var lastMotionAtMs: Long = 0L
+    private var enterCandidateSinceMs: Long = 0L
+    private var isMoving: Boolean = false
     private var lastMagnitude01 = 0f
 
     companion object {
@@ -112,40 +130,52 @@ class MotionCueEngine(
         )
 
         val hasForward = RotationMath.magnitude(mergedForward) > 0.1f
-        val forward = if (hasForward) mergedForward else floatArrayOf(0f, 1f, 0f)
-        val right = RotationMath.normalize(RotationMath.cross(forward, WORLD_UP))
+        val forward = if (hasForward) mergedForward else null
 
         // ---- 2. 车辆坐标系下的加速度分量 ----
-        val aLong = if (hasForward) RotationMath.dot(fusion.horizontalAccel, forward) else 0f
-        val aLat = if (hasForward) RotationMath.dot(fusion.horizontalAccel, right) else 0f
+        // 姿态退化（车头方向投影到水平面几乎为 0）时直接不输出纵向/横向提示：
+        // 以前会兜底成「世界 Y 轴 = 磁北」，而 AGENTS 明文禁止用磁北当前进方向，
+        // 且这个兜底值在 hasForward=false 分支里根本没被用到，属于误导性死代码。
+        val aLong: Float
+        val aLat: Float
+        if (forward != null) {
+            aLong = RotationMath.dot(fusion.horizontalAccel, forward)
+            val rightAxis = RotationMath.normalize(RotationMath.cross(forward, WORLD_UP))
+            aLat = RotationMath.dot(fusion.horizontalAccel, rightAxis)
+        } else {
+            aLong = 0f
+            aLat = 0f
+        }
 
         val aLongDead = softDeadband(aLong, config.deadbandAccel)
         val aLatDead = softDeadband(aLat, config.deadbandAccel)
         val yawDead = softDeadband(fusion.yawRate, config.deadbandYaw)
 
         // ---- 3. 映射到屏幕位移（圆点流动方向 = 车窗外景物流动方向）----
-        // 左转 yaw > 0 → 向右；左转时向心加速度朝左（aLat < 0）→ 同样向右
-        val targetXdp = clamp(
-            yawDead * config.yawGainDpPerRadS - aLatDead * config.lateralGainDpPerMS2,
-            config.maxOffsetXdp
-        )
-        // 加速前进 → 圆点向下；刹车 → 圆点向上
-        val targetYdp = clamp(
-            aLongDead * config.longitudinalGainDpPerMS2,
-            config.maxOffsetYdp
-        )
+        // 偏航角速度（瞬时、跟手）与横向加速度（持续、可靠）符号一致，
+        // 但必须按权重合成、各自归一到满行程，不能各按满增益相加：
+        // 老参数下 2.5 m/s² 的普通转弯光横向加速度就顶出 50dp，
+        // 缓转和急转看起来完全一样。
+        val yawNorm = aYawToNormalized(yawDead)
+        val latNorm = aLatDead / config.lateralReferenceMS2
+        val longNorm = aLongDead / config.longitudinalReferenceMS2
 
-        // ---- 4. 自动模式可见性 ----
-        val isMoving = fusion.horizontalAccelMagnitude > config.motionAccelThreshold ||
-            abs(fusion.yawRate) > config.motionYawThreshold
-        if (isMoving) {
-            lastMotionAtMs = timestampMs
-        }
-        val shouldShow = if (autoMode) {
-            lastMotionAtMs > 0 && timestampMs - lastMotionAtMs < (config.stillTimeoutS * 1000f)
-        } else {
-            true
-        }
+        // 左转 yaw > 0 → 圆点向右；左转时向心加速度朝左（aLat < 0）→ 同样向右
+        val targetXdp = clampTo1(
+            yawNorm * config.yawChannelWeight - latNorm * (1f - config.yawChannelWeight)
+        ) * config.maxOffsetXdp
+        // 加速前进 → 圆点向下；刹车 → 圆点向上
+        val targetYdp = clampTo1(longNorm) * config.maxOffsetYdp
+
+        // ---- 4. 自动模式可见性（进入/退出双阈值 + 确认窗口，构成迟滞）----
+        val accelMag = fusion.horizontalAccelMagnitude
+        val yawMag = abs(fusion.yawRate)
+        updateMotionState(
+            accelMag = accelMag,
+            yawMag = yawMag,
+            timestampMs = timestampMs
+        )
+        val shouldShow = if (autoMode) isMoving else true
 
         val alphaStep = if (config.fadeDurationS > 0f) dt / config.fadeDurationS else 1f
         alpha = if (shouldShow) {
@@ -185,10 +215,56 @@ class MotionCueEngine(
         alpha = 0f
         lastTimestampMs = 0L
         lastMotionAtMs = 0L
+        enterCandidateSinceMs = 0L
+        isMoving = false
         lastMagnitude01 = 0f
     }
 
     fun currentOutput(): CueOutput = CueOutput(offsetX, offsetY, alpha, lastMagnitude01)
+
+    /** 当前是否处于「车辆运动中」（自动模式的可见性判据，带迟滞） */
+    fun isVehicleMoving(): Boolean = isMoving
+
+    /**
+     * 进入用高阈值、维持用低阈值：
+     * - 静止态：连续 [CueConfig.motionConfirmMs] 超过进入阈值才认定「在动」，
+     *   避免把「拿起手机晃一下」当成上车；
+     * - 运动态：只有跌破退出阈值并持续 [CueConfig.stillTimeoutS] 才认「停了」，
+     *   匀速巡航时加速度信号很弱，单阈值会让圆点忽隐忽现。
+     */
+    private fun updateMotionState(accelMag: Float, yawMag: Float, timestampMs: Long) {
+        if (isMoving) {
+            if (accelMag > config.motionAccelExitMS2 || yawMag > config.motionYawExitRadS) {
+                lastMotionAtMs = timestampMs
+            } else if (timestampMs - lastMotionAtMs > config.stillTimeoutS * 1000f) {
+                isMoving = false
+                enterCandidateSinceMs = 0L
+            }
+            return
+        }
+
+        val aboveEnter = accelMag > config.motionAccelEnterMS2 ||
+            yawMag > config.motionYawEnterRadS
+        if (!aboveEnter) {
+            enterCandidateSinceMs = 0L
+            return
+        }
+        if (enterCandidateSinceMs == 0L) {
+            enterCandidateSinceMs = timestampMs
+            return
+        }
+        if (timestampMs - enterCandidateSinceMs >= config.motionConfirmMs) {
+            isMoving = true
+            lastMotionAtMs = timestampMs
+            enterCandidateSinceMs = 0L
+        }
+    }
+
+    /** 偏航角速度归一到 ±1（以满行程参考角速度为单位） */
+    private fun aYawToNormalized(yawDeadRadS: Float): Float =
+        yawDeadRadS / config.yawReferenceRadS
+
+    private fun clampTo1(value: Float): Float = value.coerceIn(-1f, 1f)
 
     private fun computeDt(timestampMs: Long): Float {
         if (lastTimestampMs == 0L) return 0.016f
@@ -202,9 +278,6 @@ class MotionCueEngine(
         if (magnitude <= deadband) return 0f
         return (magnitude - deadband) * (if (value > 0f) 1f else -1f)
     }
-
-    private fun clamp(value: Float, limit: Float): Float =
-        value.coerceIn(-limit, limit)
 
     private fun smoothStep(x: Float): Float {
         val t = x.coerceIn(0f, 1f)

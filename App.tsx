@@ -71,8 +71,9 @@ function RootNavigator() {
           <Text style={styles.infoTitle}>技术架构</Text>
           <InfoRow text="原生 Foreground Service 后台运行" />
           <InfoRow text="TYPE_APPLICATION_OVERLAY 系统级悬浮窗" />
-          <InfoRow text="TYPE_ROTATION_VECTOR 传感器融合" />
-          <InfoRow text="EMA 滤波 + 状态机 + 二阶预测引擎" />
+          <InfoRow text="旋转矢量 + 线性加速度 + 陀螺仪，世界坐标系融合" />
+          <InfoRow text="姿态自适应方向映射 + 临界阻尼弹簧平滑" />
+          <InfoRow text="自动模式：检测到车辆运动显示，静止后淡出" />
           <InfoRow text="覆盖微信、浏览器等任何 App" />
           <InfoRow text="完整适配 Android 16 (API 36)" />
         </View>

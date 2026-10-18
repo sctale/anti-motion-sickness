@@ -62,15 +62,15 @@ TYPE_APPLICATION_OVERLAY 窗口
 |------|-----|------|
 | 圆点数量 | 16（左右各 8） | 纵向分布 15%~85% 屏高 |
 | 边缘带宽度 | ≤ 56dp | 圆点不会侵入内容区 |
-| 水平最大位移 | ±40dp | 转向提示 |
-| 垂直最大位移 | ±48dp | 加减速提示 |
-| 偏航增益 | 110 dp/(rad/s) | 转向瞬时响应 |
-| 横向加速度增益 | 20 dp/(m/s²) | 转弯持续力提示 |
-| 纵向加速度增益 | 24 dp/(m/s²) | 加/减速提示 |
+| 水平满行程 | ±20dp | 转向提示；受边缘带几何限制（`OverlayView.MAX_SHIFT_X_DP` ≈ 20.4） |
+| 垂直满行程 | ±48dp | 加减速提示 |
+| 满行程参考输入 | 0.55 rad/s / 3.5 m/s² / 3.0 m/s² | 偏航 / 横向加速度 / 纵向加速度达到满行程所需的量级 |
+| 横向通道配比 | 偏航 0.65 : 横向加速度 0.35 | 瞬时跟手 + 持续可靠，按权重合成 |
 | 死区 | 0.12 m/s² / 0.015 rad/s | 抑制静止噪声 |
 | 平滑 | 临界阻尼弹簧 ω=12 rad/s, ζ=1.0 | 无过冲、约 0.25s 跟上 |
-| 自动模式静止超时 | 10s | 之后淡出（0.8s） |
-| 采样率 | SENSOR_DELAY_GAME (~50-100Hz) | 息屏暂停 |
+| 自动模式 | 迟滞：0.30 进入 / 0.12 维持，静止 10s 淡出 | 短暂晃动不闪现，匀速巡航不闪断 |
+| 计算与重绘 | 合并到 60Hz，独立线程 | 传感器按 GAME 采样，不占主线程 |
+| 采样率 | SENSOR_DELAY_GAME (~50-100Hz) | 息屏暂停传感器与重绘 |
 | 窗口类型 | TYPE_APPLICATION_OVERLAY | 不聚焦 + 不拦截触摸 |
 
 > 参数集中定义于 [`native/android/MotionCueEngine.kt`](./native/android/MotionCueEngine.kt) 的 `CueConfig` 与 [`native/android/OverlayView.kt`](./native/android/OverlayView.kt) 常量。
