@@ -1,5 +1,28 @@
 # 更新日志 (Changelog)
 
+## [0.3.6] - 2026-10-18
+
+### 🐛 修复
+
+- **APK 清单里 `OverlayService` 被声明两次**：把 v0.3.5 的产物用
+  `aapt2 dump xmltree` 打开才看出来 —— 复用中的 `android/` 目录（prebuild 不带 `--clean`）
+  留着 v0.2.x 手写的相对名 `.OverlayService`，而 Config Plugin 只按**原始字符串**去重，
+  `".OverlayService"` 与 `"com.anonymous.anticarsicknessrn.OverlayService"` 被判定为两个组件，
+  于是又追加了一条全限定声明。
+  `ensureService()` 现在按**解析后的组件名**判重，把相对名原地归一为全限定名，
+  并合并同名重复项。实测连续两次 `expo prebuild` 清单稳定为 2 个 `<service>`（幂等）。
+- 文档订正：v0.3.5 变更记录里添加磁贴的 API 名写错（正确入口是
+  `StatusBarManager.requestAddTileService(...)`，API 33+），已原地更正。
+  错误的 `TileService.requestAddTileService` 在平台 `android.jar` 里不存在，
+  编译期由 `Unresolved reference` 拦下，代码自 v0.3.5 起即为正确实现。
+
+### 🧪 验证
+
+- `tsc --noEmit` 通过；`tools/verify/run.sh` 14 场景 31 断言通过；
+  `compileReleaseKotlin` 通过；APK 16KB 页对齐校验通过。
+
+---
+
 ## [0.3.5] - 2026-10-18
 
 第三轮：**产品闭环**。补上 README 对标表里自己标着 ⚠️ 的两项，并把「两个功能各玩各的」连起来。
@@ -11,7 +34,7 @@
   而圆点正盖在整个屏幕上 —— 对标 Apple 的控制中心 / Google 的 Quick Settings 磁贴。
   - `ACTIVE_TILE=true`：点击直接切换，不跳进 App
   - 缺少悬浮窗权限时才回 App 引导授权（Android 14+ 走 `startActivityAndCollapse(PendingIntent)`）
-  - Android 13+ 提供「＋ 添加磁贴」按钮（`TileService.requestAddTileService`），
+  - Android 13+ 提供「＋ 添加磁贴」按钮（`StatusBarManager.requestAddTileService`），
     低版本给出「长按快捷设置面板手动拖入」的提示而不是没反应
   - 磁贴声明由 Config Plugin 注入（`BIND_QUICK_SETTINGS_TILE` + `QS_TILE` intent-filter + 图标）
 - **灵敏度三档（低 / 中 / 高）**：改变「多大动作算满行程」，运行中即时生效。

@@ -149,6 +149,44 @@ function withOverlayKotlinSources(config) {
   ]);
 }
 
+/**
+ * 幂等地登记一个 <service> 节点。
+ *
+ * android:name 可能写成相对形式（".OverlayService"）也可能写成全限定形式
+ * （"com.anonymous.anticarsicknessrn.OverlayService"），二者指向同一个组件。
+ * 只按原始字符串去重的话，复用中的 android/ 目录里历史遗留的相对名会让我们
+ * 再追加一条全限定声明 —— 实测合并后的 APK 里 OverlayService 真的出现了两次。
+ * 这里按「解析后的组件名」判重，并把已有节点的写法归一为全限定形式。
+ */
+function ensureService(application, node, packageName) {
+  const wanted = node.$['android:name'];
+  const resolve = (name) => {
+    if (typeof name !== 'string') return null;
+    if (name.startsWith('.')) return `${packageName}${name}`;
+    return name;
+  };
+
+  application.service = application.service || [];
+  const matches = application.service.filter(
+    (item) => resolve(item.$ && item.$['android:name']) === wanted
+  );
+
+  if (matches.length === 0) {
+    application.service.push(node);
+    return node;
+  }
+
+  // 归一为全限定名，并合并重复声明：清单里同一组件出现两次是无效的，
+  // 复用中的 android/ 目录（未 --clean）很容易留下历史重复项
+  const keep = matches[0];
+  keep.$['android:name'] = wanted;
+  application.service = application.service.filter(
+    (item) =>
+      resolve(item.$ && item.$['android:name']) !== wanted || item === keep
+  );
+  return keep;
+}
+
 /** 在 AndroidManifest.xml 中声明 OverlayService（specialUse 前台服务） */
 function withOverlayService(config) {
   const { name: packageName } = resolvePackage(config);
@@ -160,30 +198,26 @@ function withOverlayService(config) {
     }
 
     const serviceName = `${packageName}.OverlayService`;
-    application.service = application.service || [];
-    const exists = application.service.some(
-      (item) => item.$ && item.$['android:name'] === serviceName
-    );
-    if (exists) {
-      return cfg;
-    }
-
-    application.service.push({
-      $: {
-        'android:name': serviceName,
-        'android:exported': 'false',
-        'android:foregroundServiceType': 'specialUse',
-      },
-      property: [
-        {
-          $: {
-            'android:name': 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE',
-            'android:value':
-              'Vehicle Motion Cues display to prevent motion sickness',
-          },
+    ensureService(
+      application,
+      {
+        $: {
+          'android:name': serviceName,
+          'android:exported': 'false',
+          'android:foregroundServiceType': 'specialUse',
         },
-      ],
-    });
+        property: [
+          {
+            $: {
+              'android:name': 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE',
+              'android:value':
+                'Vehicle Motion Cues display to prevent motion sickness',
+            },
+          },
+        ],
+      },
+      packageName
+    );
     return cfg;
   });
 }
@@ -274,13 +308,7 @@ function withQuickSettingsTile(config) {
     };
 
     application.service = application.service || [];
-    const exists = application.service.some(
-      (item) =>
-        item.$ && item.$['android:name'] === tileService.$['android:name']
-    );
-    if (!exists) {
-      application.service.push(tileService);
-    }
+    ensureService(application, tileService, packageName);
     return cfg;
   });
 }
