@@ -333,6 +333,14 @@ class OverlayModule(reactContext: ReactApplicationContext) :
         )
     }
 
+    private fun reasonText(reason: String): String = when (reason) {
+        OverlayService.REASON_FGS_DENIED ->
+            "系统拒绝该服务进入前台（常见于省电策略或通知被禁用），请在系统设置里允许本应用后台运行"
+        OverlayService.REASON_PIPELINE_FAILED ->
+            "运动提示计算连续失败，服务已自动停止；请反馈机型与系统版本以便定位"
+        else -> "服务启动失败：$reason"
+    }
+
     private fun toMap(settings: SettingsStore.Settings): WritableMap =
         Arguments.createMap().apply {
             putBoolean("autoMode", settings.autoMode)
@@ -366,6 +374,12 @@ class OverlayModule(reactContext: ReactApplicationContext) :
                                 "ERR_OVERLAY_ADD_FAILED",
                                 "悬浮窗添加失败，请确认已允许「显示在其他应用上层」"
                             )
+
+                        // 其余任何已记录的失败原因都要如实报出来，
+                        // 否则会被下面的超时分支吞成「启动超时」，把真实原因（
+                        // 系统拒绝进入前台、计算连续失败）盖掉，用户和开发者都被误导。
+                        reason != null ->
+                            promise.reject("ERR_START_$reason", reasonText(reason))
 
                         SystemClock.elapsedRealtime() >= deadline ->
                             promise.reject(

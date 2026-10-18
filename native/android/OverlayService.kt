@@ -21,6 +21,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 
@@ -83,6 +84,7 @@ class OverlayService : Service(), SensorEventListener {
     /** 合并刷新：true 表示已排队一次延迟计算 */
     private var pipelineScheduled = false
     private var lastPipelineAtMs = 0L
+    private var pipelineFailures = 0
 
     private val pipelineRunnable = Runnable { runPipeline() }
 
@@ -105,7 +107,11 @@ class OverlayService : Service(), SensorEventListener {
     override fun onCreate() {
         super.onCreate()
         isRunning = true
-        startForegroundSafely()
+        if (!startForegroundSafely()) {
+            markStopped(REASON_FGS_DENIED)
+            stopSelf()
+            return
+        }
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
 
@@ -143,7 +149,11 @@ class OverlayService : Service(), SensorEventListener {
 
         // 服务已在跑时再次 startForegroundService（改设置会这样）也需要重新确认前台状态，
         // 否则 Android 8+ 可能判定「startForeground 未在时限内调用」
-        startForegroundSafely()
+        if (!startForegroundSafely()) {
+            markStopped(REASON_FGS_DENIED)
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         // 权限被撤销时不要空跑
         if (!Settings.canDrawOverlays(this)) {
@@ -164,9 +174,22 @@ class OverlayService : Service(), SensorEventListener {
         return START_STICKY
     }
 
-    /** Android 12+ 要求显式声明前台服务类型；旧版本或异常时退回无类型调用 */
-    private fun startForegroundSafely() {
-        val notification = buildNotification()
+    /**
+     * 进入前台，返回是否成功。
+     *
+     * 这里绝不能让异常逃出去：onCreate / onStartCommand 抛出未捕获异常就是整个进程崩溃，
+     * 用户看到的正是「点开就闪退」。Android 12+ 的后台启动限制、通知被禁用等情况
+     * 都可能让 startForeground 抛 ForegroundServiceStartNotAllowedException，
+     * 所以失败时返回 false，由调用方 stopSelf() 体面收场。
+     */
+    private fun startForegroundSafely(): Boolean {
+        val notification = try {
+            buildNotification()
+        } catch (e: Exception) {
+            Log.e(TAG, "构造前台通知失败，停止服务", e)
+            return false
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 startForeground(
@@ -174,11 +197,18 @@ class OverlayService : Service(), SensorEventListener {
                     notification,
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                 )
+                return true
             } catch (e: Exception) {
-                startForeground(NOTIFICATION_ID, notification)
+                Log.w(TAG, "带类型的 startForeground 失败，退回无类型调用", e)
             }
-        } else {
+        }
+
+        return try {
             startForeground(NOTIFICATION_ID, notification)
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground 被系统拒绝，停止服务", e)
+            false
         }
     }
 
@@ -254,16 +284,31 @@ class OverlayService : Service(), SensorEventListener {
             }
         }
 
-        val fused = fusion.update(
-            rotationVector = rotationVector,
-            accel = accel,
-            linearAccel = linearAccel,
-            gravity = if (hasGravity) gravityValues else null,
-            gyro = if (hasGyro) gyroValues else null
-        )
-        // @Volatile 引用只读一次，保证一帧内用的是同一个引擎实例
-        val cue = cueEngine.update(fused, now)
-        overlayManager?.update(cue.offsetXdp, cue.offsetYdp, cue.alpha, cue.magnitude01)
+        // 单帧异常不能放出去：这里跑在传感器线程上，抛出即整个进程崩溃。
+        // 但也不能像旧版那样无声吞掉每一帧 —— 连续失败到上限就主动收场并留下原因。
+        try {
+            val fused = fusion.update(
+                rotationVector = rotationVector,
+                accel = accel,
+                linearAccel = linearAccel,
+                gravity = if (hasGravity) gravityValues else null,
+                gyro = if (hasGyro) gyroValues else null
+            )
+            // @Volatile 引用只读一次，保证一帧内用的是同一个引擎实例
+            val cue = cueEngine.update(fused, now)
+            overlayManager?.update(cue.offsetXdp, cue.offsetYdp, cue.alpha, cue.magnitude01)
+            pipelineFailures = 0
+        } catch (e: Exception) {
+            pipelineFailures++
+            if (pipelineFailures >= MAX_PIPELINE_FAILURES) {
+                Log.e(TAG, "运动提示连续 $pipelineFailures 帧失败，停止传感器与悬浮窗", e)
+                markStopped(REASON_PIPELINE_FAILED)
+                unregisterSensors()
+                stopSelf()
+            } else {
+                Log.w(TAG, "运动提示单帧计算失败（$pipelineFailures/$MAX_PIPELINE_FAILURES）", e)
+            }
+        }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
@@ -446,6 +491,17 @@ class OverlayService : Service(), SensorEventListener {
         /** 启动失败原因（供 JS 给出可读提示） */
         const val REASON_PERMISSION_REVOKED = "PERMISSION_REVOKED"
         const val REASON_OVERLAY_ADD_FAILED = "OVERLAY_ADD_FAILED"
+
+        /** 系统拒绝进入前台（Android 12+ 后台启动限制等） */
+        const val REASON_FGS_DENIED = "FOREGROUND_SERVICE_DENIED"
+
+        /** 运动提示计算连续失败，服务自行收场 */
+        const val REASON_PIPELINE_FAILED = "PIPELINE_FAILED"
+
+        /** 连续多少帧计算失败就停止服务（避免每帧刷日志又不停重试） */
+        private const val MAX_PIPELINE_FAILURES = 30
+
+        private const val TAG = "OverlayService"
 
         private const val REQUEST_CONTENT = 0
         private const val REQUEST_STOP = 1
