@@ -322,9 +322,10 @@ if (-not $SkipPrebuild -and -not $UploadOnly) {
         # 与 app.json 悄悄漂移。实测踩过：gradle.properties 里 newArchEnabled 停在 false，
         # RN 0.85 以旧架构启动新运行时 → 点图标直接闪退。
         # 原生源码与配置项现在全部由 Config Plugin 重新注入，clean 是安全的。
-        npx expo prebuild --platform android --no-install --clean
-        if ($LASTEXITCODE -ne 0) {
-            throw "prebuild 失败"
+        $prebuild = Invoke-NativeCommand -AllowFailure { & npx expo prebuild --platform android --no-install --clean }
+        if ($prebuild.ExitCode -ne 0) {
+            Write-Err "prebuild 失败：`n$($prebuild.Output)"
+            exit 1
         }
         Write-Success "prebuild 完成（--clean，原生配置与 app.json 一致）"
 
@@ -368,9 +369,9 @@ if (-not $UploadOnly) {
     Write-Step "5/8 替换应用图标"
     $replaceIcons = Join-Path $ProjectRoot "replace_icons.ps1"
     if (Test-Path $replaceIcons) {
-        & powershell -ExecutionPolicy Bypass -File $replaceIcons
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warn "图标替换失败，继续构建"
+        $icons = Invoke-NativeCommand -AllowFailure { & powershell -ExecutionPolicy Bypass -File $replaceIcons }
+        if ($icons.ExitCode -ne 0) {
+            Write-Warn "图标替换失败，继续构建：$($icons.Output)"
         } else {
             Write-Success "图标已替换"
         }
@@ -392,9 +393,12 @@ if (-not $SkipBuild -and -not $UploadOnly) {
 
     Push-Location $androidDir
     try {
-        .\gradlew assembleRelease
-        if ($LASTEXITCODE -ne 0) {
-            throw "构建失败"
+        # gradle 的正常进度与告警全走 stderr，裸调用在 Stop 策略下会当场中止脚本
+        $build = Invoke-NativeCommand -AllowFailure { & .\gradlew assembleRelease }
+        if ($build.ExitCode -ne 0) {
+            Write-Err "构建失败："
+            ($build.Output -split "`n" | Select-Object -Last 40) | ForEach-Object { Write-Host $_ }
+            exit 1
         }
         Write-Success "构建完成"
     } finally {
@@ -420,7 +424,8 @@ if (Test-Path $legacyApk) {
 }
 
 if ($Aapt -and (Test-Path $Aapt)) {
-    $aaptOutput = & $Aapt dump badging $ApkDest 2>&1 | Select-String "package:"
+    $badging = Invoke-NativeCommand -AllowFailure { & $Aapt dump badging $ApkDest }
+    $aaptOutput = $badging.Output -split "`n" | Select-String "package:"
     Write-Host $aaptOutput
 
     if ($aaptOutput -match "versionName='v?$newVersion'") {
@@ -435,8 +440,9 @@ if ($Aapt -and (Test-Path $Aapt)) {
 # 16KB 页对齐校验：Android 15+ 的 16KB 设备装不上未对齐的 APK。
 # 之前 README/AGENTS 只是「声称已配置」，这里改成对产物做实测。
 if ($Zipalign -and (Test-Path $Zipalign)) {
-    $alignOut = & $Zipalign -c -P 16 -v 4 $ApkDest 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    $align = Invoke-NativeCommand -AllowFailure { & $Zipalign -c -P 16 -v 4 $ApkDest }
+    $alignOut = $align.Output -split "`n"
+    if ($align.ExitCode -eq 0) {
         Write-Success "APK 内全部 .so 已 16KB 页对齐 ✓"
     } else {
         $unaligned = $alignOut | Select-String -Pattern "lib/.*\.so" | Select-Object -First 8
