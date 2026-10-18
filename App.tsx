@@ -14,8 +14,13 @@ import { OverlayServiceProvider, useOverlayServiceContext } from './src/hooks/Ov
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { useStringPreference } from './src/hooks/usePreference';
 import { LAST_CRASH_KEY } from './src/utils/constants';
+import { installGlobalCrashReporter } from './src/utils/globalCrashReporter';
 import { VehicleMotionScreen } from './src/screens/VehicleMotionScreen';
 import { CarDetectionScreen } from './src/screens/CarDetectionScreen';
+
+// 必须早于任何可能抛错的代码：错误边界只接得住渲染期，effect/定时器/原生事件回调里的
+// 致命错误要走全局处理器，趁进程终止前把原因同步落盘。
+installGlobalCrashReporter();
 
 type Screen = 'home' | 'vehicleMotion' | 'carDetection';
 
