@@ -92,9 +92,10 @@ class OverlayView(context: Context) : View(context) {
     private fun dp(value: Float): Float = value * density
 
     companion object {
-        /** 兼容旧引用：几何常量与行程现在只在 `OverlayGeometry` 里定义一次 */
-        const val DOT_COUNT_PER_SIDE = OverlayGeometry.DOT_COUNT_PER_SIDE
+        /**
+         * 描边颜色。几何量（半径 / 边缘带 / 行程 / 两列位置）只在 `OverlayGeometry` 里定义，
+         * 这里**不再放别名**：别名会把公式冻结成快照，等于又造出第二处真源。
+         */
         const val STROKE_COLOR = "#66000000"
-        val MAX_SHIFT_X_DP: Float = OverlayGeometry.MAX_SHIFT_X_DP
     }
 }

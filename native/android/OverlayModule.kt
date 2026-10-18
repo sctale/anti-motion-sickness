@@ -338,6 +338,12 @@ class OverlayModule(reactContext: ReactApplicationContext) :
             "系统拒绝该服务进入前台（常见于省电策略或通知被禁用），请在系统设置里允许本应用后台运行"
         OverlayService.REASON_PIPELINE_FAILED ->
             "运动提示计算连续失败，服务已自动停止；请反馈机型与系统版本以便定位"
+        OverlayService.REASON_START_FAILED ->
+            "服务初始化时出错，已自动停止；请反馈机型与系统版本以便定位"
+        OverlayService.REASON_NO_SENSORS ->
+            "本机没有可用的运动传感器，无法给出防晕提示"
+        OverlayService.REASON_SENSOR_RESTART_FAILED ->
+            "调整传感器采样时失败，服务已自动停止；请反馈机型与系统版本以便定位"
         else -> "服务启动失败：$reason"
     }
 

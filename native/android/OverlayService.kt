@@ -82,12 +82,11 @@ class OverlayService : Service(), SensorEventListener {
     private var sensorsRegistered = false
 
     /**
-     * 采样档位策略只在传感器线程上使用；`requestedSamplingLevel` 是「已经投递出去的目标」，
-     * `appliedSamplingLevel` 是「系统里真正生效的」，分开记录才能在投递失败时重试。
+     * 采样档位只在传感器线程上决策。`requestedSamplingLevel` 是「已经投递出去的目标」：
+     * 投递前先去重，失败路径会把它按回 HIGH，下一帧自然再试。
      */
     private val samplingPolicy = SamplingPolicy()
     private var requestedSamplingLevel = SamplingLevel.HIGH
-    private var appliedSamplingLevel: SamplingLevel? = null
 
     /** 合并刷新：true 表示已排队一次延迟计算 */
     private var pipelineScheduled = false
@@ -121,27 +120,45 @@ class OverlayService : Service(), SensorEventListener {
             return
         }
 
-        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        // 这一段全都是会抛的系统调用：getSystemService 强转（个别 ROM 返回的实例类型不符）、
+        // HandlerThread/Looper、构造悬浮窗 View、读 SharedPreferences、注册广播。
+        // 放在生命周期回调里逃逸出去就是进程崩溃 = 又一种「点开就闪退」，所以整体兜住。
+        try {
+            sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
 
-        // 传感器线程要先建好：applySettings / registerSensors 都是往它投递任务
-        val thread = HandlerThread("OverlaySensor").also { it.start() }
-        sensorThread = thread
-        sensorHandler = Handler(thread.looper)
+            // 传感器线程要先建好：applySettings / registerSensors 都是往它投递任务
+            val thread = HandlerThread("OverlaySensor").also { it.start() }
+            sensorThread = thread
+            sensorHandler = Handler(thread.looper)
 
-        resolveSensors()
-        applySettings()
-        overlayManager = OverlayManager(this)
+            resolveSensors()
+            if (activeSensors().isEmpty()) {
+                // 连加速度计都没有的机器没法给出任何提示，与其让圆点冻在那里，不如直说
+                Log.e(TAG, "本机没有任何可用的运动传感器，停止服务")
+                markStopped(REASON_NO_SENSORS)
+                stopSelf()
+                return
+            }
 
-        registerSensors()
-        ContextCompat.registerReceiver(
-            this,
-            screenReceiver,
-            IntentFilter().apply {
-                addAction(Intent.ACTION_SCREEN_ON)
-                addAction(Intent.ACTION_SCREEN_OFF)
-            },
-            ContextCompat.RECEIVER_NOT_EXPORTED
-        )
+            applySettings()
+            overlayManager = OverlayManager(this)
+
+            registerSensors()
+            ContextCompat.registerReceiver(
+                this,
+                screenReceiver,
+                IntentFilter().apply {
+                    addAction(Intent.ACTION_SCREEN_ON)
+                    addAction(Intent.ACTION_SCREEN_OFF)
+                },
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+        } catch (t: Throwable) {
+            Log.e(TAG, "服务初始化失败，停止服务", t)
+            cleanupAfterFailure()
+            markStopped(REASON_START_FAILED)
+            stopSelf()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -153,22 +170,32 @@ class OverlayService : Service(), SensorEventListener {
 
         // 每次启动都从 SharedPreferences 重新读设置：磁贴、App 内开关、
         // 以及系统重启服务，走的都是同一条路径，避免两处真源
-        applySettings()
+        try {
+            applySettings()
 
-        // 服务已在跑时再次 startForegroundService（改设置会这样）也需要重新确认前台状态，
-        // 否则 Android 8+ 可能判定「startForeground 未在时限内调用」
-        if (!startForegroundSafely()) {
-            markStopped(REASON_FGS_DENIED)
+            // 服务已在跑时再次 startForegroundService（改设置会这样）也需要重新确认前台状态，
+            // 否则 Android 8+ 可能判定「startForeground 未在时限内调用」
+            if (!startForegroundSafely()) {
+                markStopped(REASON_FGS_DENIED)
+                stopSelf()
+                return START_NOT_STICKY
+            }
+
+            // 权限被撤销时不要空跑
+            if (!Settings.canDrawOverlays(this)) {
+                markStopped(REASON_PERMISSION_REVOKED)
+                stopSelf()
+                return START_NOT_STICKY
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "启动流程异常，停止服务", t)
+            cleanupAfterFailure()
+            markStopped(REASON_START_FAILED)
             stopSelf()
             return START_NOT_STICKY
         }
 
-        // 权限被撤销时不要空跑
-        if (!Settings.canDrawOverlays(this)) {
-            markStopped(REASON_PERMISSION_REVOKED)
-            stopSelf()
-            return START_NOT_STICKY
-        }
+        // onCreate 兜底失败后走到这里时管理器可能还没建起来，这里同样不能当它存在
         val shown = overlayManager?.show() ?: false
         if (!shown) {
             markStopped(REASON_OVERLAY_ADD_FAILED)
@@ -182,6 +209,23 @@ class OverlayService : Service(), SensorEventListener {
         return START_STICKY
     }
 
+    /** 初始化失败后的收尾：把已经建起来的东西放掉，避免留下半个服务 */
+    private fun cleanupAfterFailure() {
+        try {
+            unregisterSensors()
+        } catch (t: Throwable) {
+            Log.w(TAG, "失败收尾时注销传感器又出错", t)
+        }
+        try {
+            unregisterReceiver(screenReceiver)
+        } catch (_: Exception) {
+            // 没注册成功过，忽略
+        }
+        sensorThread?.quitSafely()
+        sensorThread = null
+        sensorHandler = null
+    }
+
     /**
      * 进入前台，返回是否成功。
      *
@@ -193,7 +237,7 @@ class OverlayService : Service(), SensorEventListener {
     private fun startForegroundSafely(): Boolean {
         val notification = try {
             buildNotification()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e(TAG, "构造前台通知失败，停止服务", e)
             return false
         }
@@ -206,7 +250,7 @@ class OverlayService : Service(), SensorEventListener {
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                 )
                 return true
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.w(TAG, "带类型的 startForeground 失败，退回无类型调用", e)
             }
         }
@@ -214,7 +258,7 @@ class OverlayService : Service(), SensorEventListener {
         return try {
             startForeground(NOTIFICATION_ID, notification)
             true
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e(TAG, "startForeground 被系统拒绝，停止服务", e)
             false
         }
@@ -312,7 +356,7 @@ class OverlayService : Service(), SensorEventListener {
             // 这时降到 200ms 会让下一次转弯慢半拍，跟手性优先。
             val desiredLevel = samplingPolicy.update(now, cue.magnitude01, cue.alpha > 0.01f)
             if (desiredLevel != requestedSamplingLevel) requestSamplingLevel(desiredLevel)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             pipelineFailures++
             if (pipelineFailures >= MAX_PIPELINE_FAILURES) {
                 Log.e(TAG, "运动提示连续 $pipelineFailures 帧失败，停止传感器与悬浮窗", e)
@@ -404,7 +448,6 @@ class OverlayService : Service(), SensorEventListener {
         handler.post {
             if (sensorsRegistered) return@post
             sensorsRegistered = true
-            appliedSamplingLevel = requestedSamplingLevel
             val rate = samplingRateFor(requestedSamplingLevel)
             activeSensors().forEach {
                 sensorManager.registerListener(this, it, rate, handler)
@@ -423,7 +466,6 @@ class OverlayService : Service(), SensorEventListener {
         handler.post {
             if (!sensorsRegistered) {
                 // 还没注册（息屏期间）：等 registerSensors 用新档位注册即可
-                appliedSamplingLevel = null
                 return@post
             }
             val rate = samplingRateFor(level)
@@ -432,12 +474,10 @@ class OverlayService : Service(), SensorEventListener {
                 activeSensors().forEach {
                     sensorManager.registerListener(this, it, rate, handler)
                 }
-                appliedSamplingLevel = level
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 // 换档半途失败最坏会让传感器全掉，那就整体重来一次并回到最高档，
                 // 宁可多耗电也不能让圆点悄悄冻住
                 Log.w(TAG, "切换采样档位失败，重建传感器注册", e)
-                appliedSamplingLevel = null
                 try {
                     sensorManager.unregisterListener(this)
                     requestedSamplingLevel = SamplingLevel.HIGH
@@ -446,10 +486,9 @@ class OverlayService : Service(), SensorEventListener {
                             this, it, samplingRateFor(SamplingLevel.HIGH), handler
                         )
                     }
-                    appliedSamplingLevel = SamplingLevel.HIGH
                 } catch (e2: Exception) {
                     Log.e(TAG, "重建传感器注册仍然失败，停止传感器与悬浮窗", e2)
-                    markStopped(REASON_PIPELINE_FAILED)
+                    markStopped(REASON_SENSOR_RESTART_FAILED)
                     sensorsRegistered = false
                     stopSelf()
                 }
@@ -477,7 +516,6 @@ class OverlayService : Service(), SensorEventListener {
             cueEngine.reset()
             // 重新亮屏后按最高档重新开始计时，避免「息屏前静止了很久」直接落到省电档
             samplingPolicy.reset()
-            appliedSamplingLevel = null
             requestedSamplingLevel = SamplingLevel.HIGH
         }
     }
@@ -566,6 +604,15 @@ class OverlayService : Service(), SensorEventListener {
 
         /** 系统拒绝进入前台（Android 12+ 后台启动限制等） */
         const val REASON_FGS_DENIED = "FOREGROUND_SERVICE_DENIED"
+
+        /** 本机没有任何可用的运动传感器，无法给出提示 */
+        const val REASON_NO_SENSORS = "NO_SENSORS"
+
+        /** 服务初始化 / 启动流程自身抛错（兜住后体面停止，不再让异常穿透生命周期回调） */
+        const val REASON_START_FAILED = "START_FAILED"
+
+        /** 切换采样档位时传感器注册重建失败 */
+        const val REASON_SENSOR_RESTART_FAILED = "SENSOR_RESTART_FAILED"
 
         /** 运动提示计算连续失败，服务自行收场 */
         const val REASON_PIPELINE_FAILED = "PIPELINE_FAILED"
