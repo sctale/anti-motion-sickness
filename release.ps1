@@ -277,7 +277,7 @@ if ($gitStatus -and -not $UploadOnly) {
 }
 
 # ============== 步骤 2: 升级版本号 ==============
-$currentVersion = (Get-Content $AppJson -Raw | ConvertFrom-Json).expo.version
+$currentVersion = (Get-Content $AppJson -Raw -Encoding UTF8 | ConvertFrom-Json).expo.version
 $newVersion = $currentVersion
 
 if ($BumpType -ne "none") {
@@ -417,7 +417,7 @@ if (-not $SkipPrebuild -and -not $UploadOnly) {
             # mod 在「复用 android/ 目录」时容易变成空操作（历史上就踩过：
             # OverlayPackage 已注册 → 提前 return → 崩溃留存注入没执行）。
             # 所以注入结果必须实测，不能只看插件跑完了。
-            $app = Get-Content (Join-Path $javaDir "MainApplication.kt") -Raw
+            $app = Get-Content (Join-Path $javaDir "MainApplication.kt") -Raw -Encoding UTF8
             foreach ($needle in @("add(OverlayPackage())", "CrashCapture.install(this)")) {
                 if ($app -notmatch [regex]::Escape($needle)) {
                     throw "MainApplication.kt 缺少注入项：$needle（Config Plugin 未生效，构建中止）"

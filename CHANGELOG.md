@@ -15,6 +15,17 @@ PATH 最前并告警。**已复现验证**：把一份 `npx.cmd` 复制到没有
 
 不改应用代码，因此不升版本号、不出新 APK。
 
+### 🛠 构建链：PS 读 `app.json` 没带 `-Encoding UTF8`，加中文标签后直接解析失败
+
+`release.ps1:280` 用 `Get-Content $AppJson -Raw | ConvertFrom-Json` 读版本号；
+Windows PowerShell 5.1 对无 BOM 的 UTF-8 默认按 ANSI/GBK 解码，
+一旦 `app.json` 里出现中文（v0.3.16 新增的 `applicationName` 就是），解码结果不再是合法 JSON，
+`ConvertFrom-Json` 抛 `ArgumentException`，发布在步骤 2 前就断。
+脚本内其余 `Get-Content` 早就带了 `-Encoding UTF8`，只有这两处漏了（`420` 读 `MainApplication.kt`，
+同样含中文注释）。现全部补齐，并扫一遍确认再无遗漏。
+教训：**给 PS 5.1 读任何 UTF-8 文件都要显式写 `-Encoding UTF8`**，这是本机已记录过的坑，
+这次是被自己新加的中文触发的。
+
 ---
 
 ## [0.3.16] - 2026-10-18
