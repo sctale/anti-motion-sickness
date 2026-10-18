@@ -73,6 +73,7 @@ native/android/
 ├── SensorFusion.kt          # 世界坐标系融合、重力扣除回退、世界垂直轴偏航角速度 ⭐
 ├── MotionCueEngine.kt       # 姿态自适应映射、死区、临界阻尼弹簧、迟滞、灵敏度 ⭐
 ├── SamplingPolicy.kt        # 静止降档 / 运动回档的采样强度策略（纯逻辑，可在 JVM 验证）⭐
+├── OverlayGeometry.kt       # 边缘带排布的纯几何：行程、钳位、列位置（不变量由断言守住）⭐
 └── RotationMath.kt          # 旋转矢量 → 旋转矩阵（纯数学，与 Android 约定一致）
 
 # prebuild 后会被注入到：
@@ -148,9 +149,9 @@ src/
 
 | 参数 | 值 | 说明 |
 |------|-----|------|
-| 圆点数量 | 16（左右各 8） | 纵向分布 15%~85% 屏高 |
+| 圆点数量 | 16（左右各 8） | 纵向分布 15%~85% 屏高，几何量全在 `OverlayGeometry` |
 | 边缘带宽度 | ≤ 56dp | 圆点不侵入内容区 |
-| 水平 / 垂直满行程 | ±20dp / ±48dp | 横向受边缘带几何限制，必须 ≤ `OverlayView.MAX_SHIFT_X_DP`（≈20.4） |
+| 水平 / 垂直满行程 | ±20dp / ±48dp | 横向受边缘带几何限制，必须 ≤ `OverlayGeometry.MAX_SHIFT_X_DP`（20.375，公式给出）；违反会被断言抓住 |
 | 满行程参考输入 | 偏航 0.55 rad/s / 横向 3.5 m/s² / 纵向 3.0 m/s² | 各自归一到满行程，避免普通驾驶直接顶到钳位 |
 | 横向通道配比 | 偏航 0.65 / 横向加速度 0.35 | 两路符号一致，按权重合成（**不能**各按满增益相加） |
 | 死区 | 0.12 m/s²，0.015 rad/s | 抑制静止噪声 |
@@ -172,8 +173,8 @@ src/
 bash tools/verify/run.sh
 ```
 
-覆盖 16 组场景（含 2 项姿态矩阵自检）：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式淡入淡出、重力回退、极端限幅、倾斜姿态下纯重力不泄漏、转弯动态范围（防饱和）、自动模式迟滞、静止降档/运动回档、档位切换不抖动。共 45 项断言。
-修改 `SensorFusion.kt` / `MotionCueEngine.kt` / `RotationMath.kt` / `SamplingPolicy.kt` 后必须全部断言通过。
+覆盖 18 组场景（含 2 项姿态矩阵自检）：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式淡入淡出、重力回退、极端限幅、倾斜姿态下纯重力不泄漏、转弯动态范围（防饱和）、自动模式迟滞、静止降档/运动回档、档位切换不抖动。共 65 项断言。
+修改 `SensorFusion.kt` / `MotionCueEngine.kt` / `RotationMath.kt` / `SamplingPolicy.kt` / `OverlayGeometry.kt` 后必须全部断言通过。
 
 ### AndroidManifest 关键配置
 
@@ -579,7 +580,7 @@ tsconfig.json              # TypeScript 配置
 index.ts                   # 入口
 App.tsx                    # 主组件
 src/                       # 所有 RN 代码
-native/android/            # 原生 Kotlin 源码（12 个文件，必须入库）⭐
+native/android/            # 原生 Kotlin 源码（13 个文件，必须入库）⭐
 plugins/                   # Config Plugin（prebuild 注入原生层）⭐
 tools/verify/              # 算法验证台（JVM 运行，无需真机）
 assets/                    # 图标资源（源文件由 tools/icons/render.mjs 生成）
