@@ -2,7 +2,8 @@
  * JS 层常量。
  *
  * 注意：悬浮窗圆点的运动学参数（阈值、增益、滤波系数）全部在原生层，
- * 见 native/android/ 下的 MotionCueEngine.kt / SensorFusion.kt / OverlayView.kt。
+ * 见 native/android/ 下的 MotionCueEngine.kt / SensorFusion.kt；
+ * 圆点排布（半径、边缘带、行程、两列位置）只在 OverlayGeometry.kt 定义一次。
  */
 
 // ===== 乘车检测（useActivityRecognition）=====

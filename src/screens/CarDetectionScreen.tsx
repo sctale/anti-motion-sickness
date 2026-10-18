@@ -23,7 +23,6 @@ const activityLabels: Record<ActivityType, string> = {
   'IN_VEHICLE': '🚗 乘车中',
   'STILL': '😌 静止',
   'WALKING': '🚶 步行中',
-  'RUNNING': '🏃 跑步中',
   'UNKNOWN': '❓ 检测中',
 };
 

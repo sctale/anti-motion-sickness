@@ -14,12 +14,8 @@ import {
   ACTIVITY_STILL_CONFIDENCE,
 } from '../utils/constants';
 
-export type ActivityType =
-  | 'IN_VEHICLE'
-  | 'STILL'
-  | 'WALKING'
-  | 'RUNNING'
-  | 'UNKNOWN';
+/** 本 hook 实际会产出的状态；不列 RUNNING —— 判定逻辑从不输出它，留着只会多一条死分支 */
+export type ActivityType = 'IN_VEHICLE' | 'STILL' | 'WALKING' | 'UNKNOWN';
 
 export interface ActivityRecognitionResult {
   activity: ActivityType;
