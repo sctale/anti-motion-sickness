@@ -2,6 +2,8 @@ package com.anonymous.anticarsicknessrn
 
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
@@ -19,6 +21,8 @@ import android.service.quicksettings.TileService
  * 不依赖 API 34 才有的 TileServiceListener。
  */
 class MotionCueTileService : TileService() {
+
+    private val handler = Handler(Looper.getMainLooper())
 
     override fun onStartListening() {
         super.onStartListening()
@@ -39,8 +43,17 @@ class MotionCueTileService : TileService() {
             return
         }
 
-        OverlayService.start(this)
+        // Android 12+ 对「后台启动前台服务」有限制，磁贴点击在部分 ROM 上
+        // 不一定被算作用户交互豁免；抛异常时退回「打开 App」而不是让进程崩溃
+        try {
+            OverlayService.start(this)
+        } catch (e: Exception) {
+            openAppForPermission()
+            return
+        }
+        // 启动是异步的：立刻刷新只能显示「未开启」，稍后再刷一次反映真实状态
         updateTile()
+        handler.postDelayed({ updateTile() }, TILE_REFRESH_DELAY_MS)
     }
 
     private fun updateTile() {
@@ -90,5 +103,8 @@ class MotionCueTileService : TileService() {
     companion object {
         private const val LABEL = "防晕车提示"
         private const val REQUEST_OPEN_APP = 9001
+
+        /** 点击启动后补刷一次磁贴状态的延时（服务启动是异步的） */
+        private const val TILE_REFRESH_DELAY_MS = 600L
     }
 }

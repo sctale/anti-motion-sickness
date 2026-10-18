@@ -2,15 +2,17 @@ package com.anonymous.anticarsicknessrn
 
 import android.Manifest
 import android.app.Activity
+import android.app.StatusBarManager
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
-import android.service.quicksettings.TileService
 import androidx.core.app.ActivityCompat
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -62,7 +64,7 @@ class OverlayModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun requestNotificationPermission(promise: Promise) {
-        val activity: Activity? = currentActivity
+        val activity: Activity? = getCurrentActivity()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             // Android 12 及以下装了就默认有
             promise.resolve(true)
@@ -183,7 +185,12 @@ class OverlayModule(reactContext: ReactApplicationContext) :
      * 请求把「防晕车提示」磁贴添加到 Quick Settings。
      *
      * 磁贴默认不在用户的通知栏里，需要手动拖进去；没有这个入口时，
-     * 用户几乎发现不了该功能。Android 13+ 可由系统弹出添加确认框。
+     * 用户几乎发现不了该功能。
+     *
+     * 注意 API 归属：添加磁贴的入口是 [StatusBarManager.requestAddTileService]
+     * （Android 13 / API 33 起），**不是** TileService 上的静态方法 ——
+     * 平台 android.jar 里 TileService 根本没有 requestAddTileService。
+     * 结果由系统异步回调（用户可以在确认框里取消），所以 Promise 在回调中结算。
      */
     @ReactMethod
     fun requestAddTile(promise: Promise) {
@@ -194,30 +201,41 @@ class OverlayModule(reactContext: ReactApplicationContext) :
             )
             return
         }
-        val activity: Activity? = currentActivity
-        if (activity == null) {
-            promise.reject("ERR_NO_ACTIVITY", "当前没有可用界面，请在 App 前台时再试")
-            return
-        }
+        val context: Context = getCurrentActivity() ?: reactApplicationContext
         try {
-            val componentName = ComponentName(activity, MotionCueTileService::class.java)
-            val iconId = activity.resources.getIdentifier(
-                TILE_ICON_NAME, "drawable", activity.packageName
-            )
-            val icon = if (iconId != 0) {
-                androidx.core.content.ContextCompat.getDrawable(activity, iconId)
-            } else {
-                null
+            val manager = context.getSystemService(StatusBarManager::class.java)
+            if (manager == null) {
+                promise.reject("ERR_NO_STATUS_BAR_SERVICE", "系统未提供状态栏管理服务，请手动添加磁贴")
+                return
             }
-            // 添加结果由系统回调，这里只报告「请求已发起」
-            TileService.requestAddTileService(
-                activity,
+
+            val componentName = ComponentName(context, MotionCueTileService::class.java)
+            val iconId = context.resources.getIdentifier(
+                TILE_ICON_NAME, "drawable", context.packageName
+            )
+            val icon = Icon.createWithResource(
+                context.packageName,
+                if (iconId != 0) iconId else context.applicationInfo.icon
+            )
+
+            manager.requestAddTileService(
                 componentName,
                 TILE_LABEL,
                 icon,
-                Intent()
-            )
-            promise.resolve(true)
+                context.mainExecutor
+            ) { result: Int ->
+                when (result) {
+                    StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED,
+                    StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED ->
+                        promise.resolve(true)
+
+                    StatusBarManager.TILE_ADD_REQUEST_ERROR_APP_NOT_IN_FOREGROUND ->
+                        promise.reject("ERR_TILE_NOT_FOREGROUND", "请在 App 前台时再试一次")
+
+                    else ->
+                        promise.reject("ERR_TILE_NOT_ADDED", "未添加磁贴（系统结果码 $result）")
+                }
+            }
         } catch (e: Exception) {
             promise.reject("ERR_REQUEST_ADD_TILE", e)
         } catch (e: NoSuchMethodError) {
