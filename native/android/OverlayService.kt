@@ -43,7 +43,7 @@ class OverlayService : Service(), SensorEventListener {
 
     private lateinit var sensorManager: SensorManager
     private val fusion = SensorFusion()
-    private val cueEngine = MotionCueEngine()
+    private var cueEngine = MotionCueEngine()
     private var overlayManager: OverlayManager? = null
 
     private var sensorThread: HandlerThread? = null
@@ -70,7 +70,6 @@ class OverlayService : Service(), SensorEventListener {
     private var hasGyro = false
 
     private var sensorsRegistered = false
-    private var autoMode = true
 
     /** 合并刷新：true 表示已排队一次延迟计算 */
     private var pipelineScheduled = false
@@ -101,7 +100,7 @@ class OverlayService : Service(), SensorEventListener {
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         resolveSensors()
-        cueEngine.autoMode = autoMode
+        applySettings()
         overlayManager = OverlayManager(this)
 
         val thread = HandlerThread("OverlaySensor").also { it.start() }
@@ -127,10 +126,13 @@ class OverlayService : Service(), SensorEventListener {
             return START_NOT_STICKY
         }
 
-        intent?.let {
-            autoMode = it.getBooleanExtra(EXTRA_AUTO_MODE, autoMode)
-            cueEngine.autoMode = autoMode
-        }
+        // 每次启动都从 SharedPreferences 重新读设置：磁贴、App 内开关、
+        // 以及系统重启服务，走的都是同一条路径，避免两处真源
+        applySettings()
+
+        // 服务已在跑时再次 startForegroundService（改设置会这样）也需要重新确认前台状态，
+        // 否则 Android 8+ 可能判定「startForeground 未在时限内调用」
+        startForegroundSafely()
 
         // 权限被撤销时不要空跑
         if (!Settings.canDrawOverlays(this)) {
@@ -278,6 +280,17 @@ class OverlayService : Service(), SensorEventListener {
         System.arraycopy(source, 0, target, 0, n)
     }
 
+    /** 读取（并应用）用户设置：自动模式开关 + 灵敏度档位 */
+    private fun applySettings() {
+        val settings = SettingsStore.get(this)
+        val engine = MotionCueEngine(
+            MotionCueEngine.CueConfig().withSensitivity(settings.sensitivity)
+        )
+        engine.autoMode = settings.autoMode
+        engine.reset()
+        cueEngine = engine
+    }
+
     private fun resolveSensors() {
         rotationVectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
         gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
@@ -374,7 +387,23 @@ class OverlayService : Service(), SensorEventListener {
         const val CHANNEL_ID = "overlay_service"
         const val NOTIFICATION_ID = 1001
         const val ACTION_STOP = "com.anonymous.anticarsicknessrn.action.STOP"
-        const val EXTRA_AUTO_MODE = "auto_mode"
+
+        /**
+         * 唯一的启动入口：App 内按钮（OverlayModule）与 Quick Settings 磁贴
+         * 都走这里，设置从 SharedPreferences 读，不再用 Intent extra 传参。
+         */
+        fun start(context: Context) {
+            val intent = Intent(context, OverlayService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
+
+        fun stop(context: Context) {
+            context.stopService(Intent(context, OverlayService::class.java))
+        }
 
         /** 启动失败原因（供 JS 给出可读提示） */
         const val REASON_PERMISSION_REVOKED = "PERMISSION_REVOKED"

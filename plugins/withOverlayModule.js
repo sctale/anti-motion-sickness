@@ -232,9 +232,63 @@ function withOverlayPackage(config) {
   });
 }
 
+/** 在 AndroidManifest.xml 中声明 Quick Settings 磁贴服务 */
+function withQuickSettingsTile(config) {
+  const { name: packageName } = resolvePackage(config);
+
+  return withAndroidManifest(config, (cfg) => {
+    const application = cfg.modResults.manifest.application?.[0];
+    if (!application) {
+      return cfg;
+    }
+
+    const tileService = {
+      $: {
+        'android:name': `${packageName}.MotionCueTileService`,
+        // 磁贴由系统（TileServer）绑定，必须 exported + 专用权限
+        'android:exported': 'true',
+        'android:label': '防晕车提示',
+        'android:icon': '@drawable/ic_stat_motion',
+        'android:permission': 'android.permission.BIND_QUICK_SETTINGS_TILE',
+      },
+      'intent-filter': [
+        {
+          action: [
+            {
+              $: {
+                'android:name': 'android.service.quicksettings.action.QS_TILE',
+              },
+            },
+          ],
+        },
+      ],
+      // ACTIVE_TILE：点击磁贴本身即可切换，不必跳进 App
+      'meta-data': [
+        {
+          $: {
+            'android:name': 'android.service.quicksettings.ACTIVE_TILE',
+            'android:value': 'true',
+          },
+        },
+      ],
+    };
+
+    application.service = application.service || [];
+    const exists = application.service.some(
+      (item) =>
+        item.$ && item.$['android:name'] === tileService.$['android:name']
+    );
+    if (!exists) {
+      application.service.push(tileService);
+    }
+    return cfg;
+  });
+}
+
 module.exports = function withOverlayModule(config) {
   config = withOverlayKotlinSources(config);
   config = withOverlayService(config);
+  config = withQuickSettingsTile(config);
   config = withOverlayPackage(config);
   return config;
 };

@@ -9,26 +9,44 @@ import {
   Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useOverlayService } from '../hooks/useOverlayService';
+import { useOverlayServiceContext } from '../hooks/OverlayServiceContext';
+import {
+  SENSITIVITY,
+  SENSITIVITY_LABELS,
+  toSensitivityLevel,
+  type SensitivityLevel,
+} from '../native/OverlayNative';
 
 interface VehicleMotionScreenProps {
   onExit: () => void;
 }
 
+const SENSITIVITY_LEVELS: SensitivityLevel[] = ['low', 'medium', 'high'];
+
+const SENSITIVITY_HINTS: Record<SensitivityLevel, string> = {
+  low: '只有明显加减速 / 转弯时才有动作',
+  medium: '推荐：日常驾驶幅度',
+  high: '轻微动作也会跟着动',
+};
+
 export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit }) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  // 对标 Apple「自动」/ Google「Start in a moving vehicle」：静止时隐藏圆点
-  const [autoMode, setAutoMode] = useState(true);
+  const [tileHint, setTileHint] = useState<string | null>(null);
 
   const {
     hasPermission,
     isRunning,
     isSupported,
+    settings,
     checkPermission,
     requestPermission,
     startService,
     stopService,
-  } = useOverlayService();
+    updateSettings,
+    requestNotificationPermission,
+    canRequestAddTile,
+    requestAddTile,
+  } = useOverlayServiceContext();
 
   const handleStart = useCallback(async () => {
     setErrorMessage(null);
@@ -37,31 +55,64 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
       setErrorMessage('需要悬浮窗权限才能在其他应用上显示防晕车圆点');
       return;
     }
+    // 通知被隐藏时，用户只能回 App 才能关掉圆点，所以首次启动顺带请求一次通知权限
+    requestNotificationPermission();
     try {
-      await startService(autoMode);
+      await startService();
     } catch (e) {
       setErrorMessage('启动服务失败：' + (e as Error).message);
     }
-  }, [checkPermission, startService, autoMode]);
+  }, [checkPermission, startService, requestNotificationPermission]);
 
-  const handleRequestPermission = useCallback(async () => {
+  const handleRequestPermission = useCallback(async (): Promise<void> => {
     setErrorMessage(null);
     await requestPermission();
-    setTimeout(() => {
-      checkPermission();
-    }, 1000);
-  }, [requestPermission, checkPermission]);
+    // 授权页返回后 AppState 会触发重新检查，不需要再用 setTimeout 猜时间
+  }, [requestPermission]);
 
   const handleStop = useCallback(async () => {
     await stopService();
   }, [stopService]);
 
-  const handleExit = useCallback(async () => {
-    if (isRunning) {
-      await stopService();
+  const handleAutoModeChange = useCallback(
+    async (value: boolean): Promise<void> => {
+      setErrorMessage(null);
+      try {
+        await updateSettings({ autoMode: value });
+      } catch (e) {
+        setErrorMessage('保存设置失败：' + (e as Error).message);
+      }
+    },
+    [updateSettings]
+  );
+
+  const handleSensitivityChange = useCallback(
+    async (level: SensitivityLevel): Promise<void> => {
+      setErrorMessage(null);
+      try {
+        await updateSettings({ sensitivity: SENSITIVITY[level] });
+      } catch (e) {
+        setErrorMessage('保存设置失败：' + (e as Error).message);
+      }
+    },
+    [updateSettings]
+  );
+
+  const handleAddTile = useCallback(async (): Promise<void> => {
+    setTileHint(null);
+    try {
+      await requestAddTile();
+      setTileHint('已发起请求，请在系统弹窗中确认添加');
+    } catch (e) {
+      setTileHint((e as Error).message);
     }
+  }, [requestAddTile]);
+
+  // 返回不再停服务：圆点的用途就是盖在其他 App 上，
+  // 在 App 内翻页不应该把提示关掉（停止交给「停止」按钮 / 通知栏 / 磁贴）
+  const handleExit = useCallback(() => {
     onExit();
-  }, [isRunning, stopService, onExit]);
+  }, [onExit]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -124,15 +175,43 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
             <View style={styles.controlLabelBlock}>
               <Text style={styles.controlLabel}>自动模式</Text>
               <Text style={styles.controlHint}>
-                检测到车辆运动时显示圆点，静止约 10 秒后自动隐藏（启动时生效）
+                检测到车辆运动时显示圆点，静止约 10 秒后自动隐藏。运行中也能切换
               </Text>
             </View>
             <Switch
-              value={autoMode}
-              onValueChange={setAutoMode}
+              value={settings.autoMode}
+              onValueChange={handleAutoModeChange}
               trackColor={{ false: '#334155', true: '#6366F1' }}
               thumbColor="#fff"
             />
+          </View>
+
+          <View style={styles.sensitivitySection}>
+            <Text style={styles.controlLabel}>灵敏度</Text>
+            <View style={styles.sensitivityButtons}>
+              {SENSITIVITY_LEVELS.map((level) => {
+                const active = toSensitivityLevel(settings.sensitivity) === level;
+                return (
+                  <TouchableOpacity
+                    key={level}
+                    style={[styles.sensitivityButton, active && styles.sensitivityButtonActive]}
+                    onPress={() => handleSensitivityChange(level)}
+                  >
+                    <Text
+                      style={[
+                        styles.sensitivityButtonText,
+                        active && styles.sensitivityButtonTextActive,
+                      ]}
+                    >
+                      {SENSITIVITY_LABELS[level]}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={styles.controlHint}>
+              {SENSITIVITY_HINTS[toSensitivityLevel(settings.sensitivity)]}
+            </Text>
           </View>
 
           <TouchableOpacity
@@ -141,9 +220,23 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
             disabled={!isSupported || hasPermission === false}
           >
             <Text style={styles.controlButtonText}>
-              {isRunning ? '⏸ 暂停' : '▶ 启动'}
+              {isRunning ? '⏹ 停止' : '▶ 启动'}
             </Text>
           </TouchableOpacity>
+
+          {isSupported && canRequestAddTile && (
+            <TouchableOpacity style={styles.tileButton} onPress={handleAddTile}>
+              <Text style={styles.tileButtonText}>＋ 添加快捷设置磁贴</Text>
+            </TouchableOpacity>
+          )}
+          {tileHint !== null && (
+            <Text style={styles.tileHint}>{tileHint}</Text>
+          )}
+
+          <Text style={styles.controlHint}>
+            返回或切到其他 App 都不会中断圆点；停止请用上面的按钮、通知栏的「停止」，
+            或下拉快捷设置点磁贴。
+          </Text>
         </View>
 
         <View style={styles.infoCard}>
@@ -331,6 +424,56 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '700',
+  },
+  sensitivitySection: {
+    marginBottom: 16,
+  },
+  sensitivityButtons: {
+    flexDirection: 'row',
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  sensitivityButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'transparent',
+    marginRight: 8,
+  },
+  sensitivityButtonActive: {
+    backgroundColor: 'rgba(99,102,241,0.25)',
+    borderColor: '#6366F1',
+  },
+  sensitivityButtonText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  sensitivityButtonTextActive: {
+    color: '#fff',
+  },
+  tileButton: {
+    marginTop: 12,
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  tileButtonText: {
+    color: '#C7D2FE',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  tileHint: {
+    marginTop: 8,
+    color: '#A5B4FC',
+    fontSize: 12,
+    lineHeight: 17,
   },
   infoCard: {
     backgroundColor: 'rgba(255,255,255,0.05)',

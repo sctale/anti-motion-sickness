@@ -284,3 +284,20 @@ class MotionCueEngine(
         return t * t * (3f - 2f * t)
     }
 }
+
+/**
+ * 按灵敏度缩放「满行程参考输入」：灵敏度越高，同样的驾驶动作越接近满行程。
+ *
+ * 只动参考输入、不动 maxOffsetXdp/maxOffsetYdp，是为了保住 OverlayView 的边缘带几何约束。
+ * 如果改成放大位移上限，会重新引入 v0.3.3 前「引擎请求 40dp、View 只给 20dp」的静默裁剪。
+ * 死区与自动模式判据不随灵敏度变：那两类阈值描述的是传感器噪声和「有没有在动」，
+ * 与用户希望的显示幅度无关。
+ */
+fun MotionCueEngine.CueConfig.withSensitivity(sensitivity: Float): MotionCueEngine.CueConfig {
+    val s = sensitivity.coerceIn(0.5f, 2.0f)
+    return copy(
+        yawReferenceRadS = yawReferenceRadS / s,
+        lateralReferenceMS2 = lateralReferenceMS2 / s,
+        longitudinalReferenceMS2 = longitudinalReferenceMS2 / s
+    )
+}

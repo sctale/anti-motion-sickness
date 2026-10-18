@@ -1,13 +1,17 @@
-import React, { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { Accelerometer } from 'expo-sensors';
 import {
   GRAVITY_G,
   ACCEL_MOTION_THRESHOLD,
+  ACCEL_MOTION_UPPER_BOUND,
   STILL_MOTION_THRESHOLD,
   ACTIVITY_VEHICLE_SAMPLING_WINDOW_MS,
   ACTIVITY_CONFIDENCE_INCREASE,
   ACTIVITY_CONFIDENCE_DECREASE,
   ACTIVITY_DEFAULT_SAMPLING_INTERVAL_MS,
+  ACTIVITY_HISTORY_SIZE,
+  ACTIVITY_IN_VEHICLE_CONFIDENCE,
+  ACTIVITY_STILL_CONFIDENCE,
 } from '../utils/constants';
 
 export type ActivityType =
@@ -25,7 +29,8 @@ export interface ActivityRecognitionResult {
 
 interface UseActivityRecognitionProps {
   isActive: boolean;
-  onActivityChanged: (result: ActivityRecognitionResult) => void;
+  /** 可选：界面直接用返回的 currentActivity / confidence 即可，不必再自己镜像一份 */
+  onActivityChanged?: (result: ActivityRecognitionResult) => void;
   samplingInterval?: number;
 }
 
@@ -40,13 +45,19 @@ export function useActivityRecognition({
 
   const motionHistoryRef = useRef<number[]>([]);
   const lastUpdateRef = useRef(0);
-  const accumulatorRef = useRef(0);
   const activityConfidenceRef = useRef(0);
+
+  // 回调放进 ref：避免调用方每次渲染都换一个新函数引用，
+  // 导致监听器被反复注销 / 重建
+  const onActivityChangedRef = useRef(onActivityChanged);
+  useEffect(() => {
+    onActivityChangedRef.current = onActivityChanged;
+  }, [onActivityChanged]);
 
   const updateActivity = useCallback(
     (motionLevel: number, currentTime: number) => {
       motionHistoryRef.current.push(motionLevel);
-      if (motionHistoryRef.current.length > 10) {
+      if (motionHistoryRef.current.length > ACTIVITY_HISTORY_SIZE) {
         motionHistoryRef.current.shift();
       }
 
@@ -60,7 +71,8 @@ export function useActivityRecognition({
           motionHistoryRef.current.reduce((a, b) => a + b, 0) /
           motionHistoryRef.current.length;
         const isInVehicle =
-          avgMotion > ACCEL_MOTION_THRESHOLD && avgMotion < 2.0;
+          avgMotion > ACCEL_MOTION_THRESHOLD &&
+          avgMotion < ACCEL_MOTION_UPPER_BOUND;
         const isStill = avgMotion < STILL_MOTION_THRESHOLD;
 
         if (isInVehicle) {
@@ -81,9 +93,9 @@ export function useActivityRecognition({
         }
 
         let newActivity: ActivityType = 'UNKNOWN';
-        if (activityConfidenceRef.current > 60) {
+        if (activityConfidenceRef.current > ACTIVITY_IN_VEHICLE_CONFIDENCE) {
           newActivity = 'IN_VEHICLE';
-        } else if (activityConfidenceRef.current < 30) {
+        } else if (activityConfidenceRef.current < ACTIVITY_STILL_CONFIDENCE) {
           newActivity = 'STILL';
         } else {
           newActivity = avgMotion > STILL_MOTION_THRESHOLD ? 'WALKING' : 'STILL';
@@ -92,26 +104,27 @@ export function useActivityRecognition({
         setCurrentActivity(newActivity);
         setConfidence(activityConfidenceRef.current);
 
-        const result: ActivityRecognitionResult = {
+        onActivityChangedRef.current?.({
           activity: newActivity,
           confidence: activityConfidenceRef.current,
           timestamp: currentTime,
-        };
-
-        onActivityChanged(result);
+        });
       }
     },
-    [onActivityChanged]
+    []
   );
+
+  const reset = useCallback(() => {
+    setCurrentActivity('STILL');
+    setConfidence(0);
+    motionHistoryRef.current = [];
+    activityConfidenceRef.current = 0;
+    setIsMonitoring(false);
+  }, []);
 
   useEffect(() => {
     if (!isActive) {
-      Accelerometer.removeAllListeners();
-      setIsMonitoring(false);
-      setCurrentActivity('STILL');
-      setConfidence(0);
-      motionHistoryRef.current = [];
-      activityConfidenceRef.current = 0;
+      reset();
       return;
     }
 
@@ -122,29 +135,17 @@ export function useActivityRecognition({
     const subscription = Accelerometer.addListener((data) => {
       // 合矢量包含重力，先扣除静止时的 1g 基线，得到线性加速度（单位 g）
       const magnitude = Math.sqrt(data.x ** 2 + data.y ** 2 + data.z ** 2);
-      const motionLevel = Math.abs(magnitude - GRAVITY_G);
-      accumulatorRef.current += motionLevel;
-      updateActivity(motionLevel, Date.now());
+      updateActivity(Math.abs(magnitude - GRAVITY_G), Date.now());
     });
 
-    return () => {
-      subscription.remove();
-      setIsMonitoring(false);
-    };
-  }, [isActive, samplingInterval, updateActivity]);
-
-  const getCurrentActivity = useCallback((): ActivityRecognitionResult => {
-    return {
-      activity: currentActivity,
-      confidence,
-      timestamp: Date.now(),
-    };
-  }, [currentActivity, confidence]);
+    // 只注销自己这条订阅：Accelerometer.removeAllListeners() 会把
+    // 其他使用加速度计的模块一起踢掉
+    return () => subscription.remove();
+  }, [isActive, samplingInterval, updateActivity, reset]);
 
   return {
     currentActivity,
     confidence,
     isMonitoring,
-    getCurrentActivity,
   };
 }

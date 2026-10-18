@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import Constants from 'expo-constants';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { OverlayServiceProvider, useOverlayServiceContext } from './src/hooks/OverlayServiceContext';
 import { VehicleMotionScreen } from './src/screens/VehicleMotionScreen';
 import { CarDetectionScreen } from './src/screens/CarDetectionScreen';
 
@@ -21,7 +22,9 @@ const APP_VERSION = Constants.expoConfig?.version ?? '0.0.0';
 export default function App() {
   return (
     <SafeAreaProvider>
-      <RootNavigator />
+      <OverlayServiceProvider>
+        <RootNavigator />
+      </OverlayServiceProvider>
     </SafeAreaProvider>
   );
 }
@@ -56,6 +59,7 @@ function RootNavigator() {
           title="Vehicle Motion"
           description="基于原生 Android 传感器融合 + 实时悬浮窗的视觉反馈，在其他应用上显示防晕车圆点"
           buttonLabel="启动 Vehicle Motion"
+          badge={<RunningBadge />}
           onPress={() => setScreen('vehicleMotion')}
         />
 
@@ -95,15 +99,29 @@ interface FeatureCardProps {
   description: string;
   buttonLabel: string;
   onPress: () => void;
+  badge?: React.ReactNode;
 }
 
-function FeatureCard({ icon, title, description, buttonLabel, onPress }: FeatureCardProps) {
+/** 首页直接显示圆点是否在跑：以前要进二级页才知道当前状态 */
+function RunningBadge() {
+  const { isRunning } = useOverlayServiceContext();
+  if (!isRunning) return null;
+  return (
+    <View style={styles.runningBadge}>
+      <View style={styles.runningDot} />
+      <Text style={styles.runningBadgeText}>圆点运行中</Text>
+    </View>
+  );
+}
+
+function FeatureCard({ icon, title, description, buttonLabel, onPress, badge }: FeatureCardProps) {
   return (
     <View style={styles.featureCard}>
       <View style={styles.featureIcon}>
         <Text style={styles.featureIconText}>{icon}</Text>
       </View>
       <Text style={styles.featureTitle}>{title}</Text>
+      {badge ?? null}
       <Text style={styles.featureDescription}>{description}</Text>
       <TouchableOpacity
         style={styles.startButton}
@@ -178,6 +196,28 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1E293B',
     marginBottom: 12,
+  },
+  runningBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: '#DCFCE7',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginBottom: 12,
+  },
+  runningDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#22C55E',
+    marginRight: 8,
+  },
+  runningBadgeText: {
+    color: '#15803D',
+    fontSize: 13,
+    fontWeight: '700',
   },
   featureDescription: {
     fontSize: 15,

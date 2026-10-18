@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,12 +9,11 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  useActivityRecognition,
-  ActivityType,
-  ActivityRecognitionResult,
-} from '../hooks/useActivityRecognition';
+import { useActivityRecognition, ActivityType } from '../hooks/useActivityRecognition';
 import { useVibrationService, VibrationFrequency } from '../hooks/useVibrationService';
+import { useBooleanPreference, useStringPreference } from '../hooks/usePreference';
+import { useOverlayServiceContext } from '../hooks/OverlayServiceContext';
+import { ACTIVITY_IN_VEHICLE_CONFIDENCE } from '../utils/constants';
 
 interface CarDetectionScreenProps {
   onExit: () => void;
@@ -36,48 +35,101 @@ const frequencyLabels: Record<VibrationFrequency, string> = {
 
 const frequencyOptions: VibrationFrequency[] = ['low', 'medium', 'high'];
 
+const PREF_VIBRATION_ENABLED = 'vibration_enabled';
+const PREF_VIBRATION_FREQUENCY = 'vibration_frequency';
+const PREF_AUTO_START_CUES = 'auto_start_cues';
+
 export const CarDetectionScreen: React.FC<CarDetectionScreenProps> = ({ onExit }) => {
   const [isDetectionActive, setIsDetectionActive] = useState(false);
-  const [vibrationEnabled, setVibrationEnabled] = useState(true);
-  const [vibrationFrequency, setVibrationFrequency] = useState<VibrationFrequency>('medium');
-  const [currentActivity, setCurrentActivity] = useState<ActivityType>('STILL');
-  const [confidence, setConfidence] = useState(0);
+  const [linkageHint, setLinkageHint] = useState<string | null>(null);
 
-  const handleActivityChange = useCallback((result: ActivityRecognitionResult) => {
-    setCurrentActivity(result.activity);
-    setConfidence(result.confidence);
-  }, []);
+  // 偏好写在原生 SharedPreferences，重启 App 后还记得
+  const [vibrationEnabled, setVibrationEnabled] = useBooleanPreference(
+    PREF_VIBRATION_ENABLED,
+    true
+  );
+  const [rawFrequency, setRawFrequency] = useStringPreference(
+    PREF_VIBRATION_FREQUENCY,
+    'medium'
+  );
+  const [autoStartCues, setAutoStartCues] = useBooleanPreference(
+    PREF_AUTO_START_CUES,
+    false
+  );
 
-  useActivityRecognition({
-    isActive: isDetectionActive,
-    onActivityChanged: handleActivityChange,
-  });
+  const vibrationFrequency: VibrationFrequency =
+    (frequencyOptions as string[]).includes(rawFrequency)
+      ? (rawFrequency as VibrationFrequency)
+      : 'medium';
+
+  const {
+    currentActivity,
+    confidence,
+  } = useActivityRecognition({ isActive: isDetectionActive });
 
   const shouldVibrate = isDetectionActive && currentActivity === 'IN_VEHICLE';
 
-  const {
-    vibrationCount,
-    resetCount,
-  } = useVibrationService({
+  const { vibrationCount, resetCount } = useVibrationService({
     isActive: shouldVibrate,
     frequency: vibrationFrequency,
     enabled: vibrationEnabled,
   });
 
+  const {
+    isRunning: cuesRunning,
+    hasPermission,
+    isSupported: cuesSupported,
+    startService,
+  } = useOverlayServiceContext();
+
+  // 联动：检测到乘车时自动开启防晕圆点（这是「两个功能各玩各的」的直接修补）。
+  // 只在检测页处于开启状态时有效 —— 关闭本页后不再持续检测。
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (!autoStartCues || !isDetectionActive) {
+      autoStartedRef.current = false;
+      return;
+    }
+    if (currentActivity !== 'IN_VEHICLE' || confidence < ACTIVITY_IN_VEHICLE_CONFIDENCE) {
+      return;
+    }
+    if (autoStartedRef.current || cuesRunning) return;
+    if (!cuesSupported || hasPermission === false) {
+      setLinkageHint('检测到乘车，但缺少悬浮窗权限，请先到 Vehicle Motion 授权');
+      autoStartedRef.current = true;
+      return;
+    }
+    autoStartedRef.current = true;
+    startService()
+      .then(() => setLinkageHint('检测到乘车，已自动开启防晕圆点'))
+      .catch((e: Error) => setLinkageHint('自动开启失败：' + e.message));
+  }, [
+    autoStartCues,
+    isDetectionActive,
+    currentActivity,
+    confidence,
+    cuesRunning,
+    cuesSupported,
+    hasPermission,
+    startService,
+  ]);
+
   const handleToggleDetection = useCallback(() => {
     if (isDetectionActive) {
       setIsDetectionActive(false);
-      setCurrentActivity('STILL');
-      setConfidence(0);
+      setLinkageHint(null);
       resetCount();
     } else {
       setIsDetectionActive(true);
     }
   }, [isDetectionActive, resetCount]);
 
-  const handleFrequencyChange = useCallback((freq: VibrationFrequency) => {
-    setVibrationFrequency(freq);
-  }, []);
+  const handleFrequencyChange = useCallback(
+    (freq: VibrationFrequency) => {
+      setRawFrequency(freq);
+    },
+    [setRawFrequency]
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
@@ -164,6 +216,25 @@ export const CarDetectionScreen: React.FC<CarDetectionScreenProps> = ({ onExit }
               ))}
             </View>
           </View>
+
+          <View style={styles.controlRow}>
+            <View style={styles.controlLabelBlock}>
+              <Text style={styles.controlLabel}>乘车时自动开启圆点</Text>
+              <Text style={styles.controlSubLabel}>
+                检测到 IN_VEHICLE 后直接启动防晕车悬浮窗（仅在本页检测开启期间有效）
+              </Text>
+            </View>
+            <Switch
+              value={autoStartCues}
+              onValueChange={setAutoStartCues}
+              trackColor={{ false: '#E2E8F0', true: '#6366F1' }}
+              thumbColor="#fff"
+            />
+          </View>
+
+          {linkageHint !== null && (
+            <Text style={styles.linkageHint}>{linkageHint}</Text>
+          )}
         </View>
 
         <View style={styles.statsCard}>
@@ -287,6 +358,22 @@ const styles = StyleSheet.create({
   controlLabel: {
     fontSize: 16,
     color: '#1E293B',
+  },
+  controlLabelBlock: {
+    flex: 1,
+    marginRight: 12,
+  },
+  controlSubLabel: {
+    fontSize: 12,
+    color: '#64748B',
+    lineHeight: 17,
+    marginTop: 4,
+  },
+  linkageHint: {
+    marginTop: 12,
+    fontSize: 13,
+    color: '#4F46E5',
+    lineHeight: 19,
   },
   frequencySection: {
     marginTop: 8,

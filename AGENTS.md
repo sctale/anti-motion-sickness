@@ -60,15 +60,17 @@ TYPE_APPLICATION_OVERLAY 窗口
 原生源码**纳入版本管理**，存放于 `native/android/`，由 Config Plugin 在 prebuild 时注入 `android/`：
 
 ```
-plugins/withOverlayModule.js   # Config Plugin：复制 .kt（改写包名）+ 注册 service/Package + 通知图标
+plugins/withOverlayModule.js   # Config Plugin：复制/清理 .kt + 注册前台服务/磁贴/Package + 图标
 native/android/
-├── OverlayService.kt        # 前台服务：传感器注册/回退、息屏暂停、通知与「停止」操作 ⭐
-├── OverlayView.kt           # Canvas 自定义 View：左右各 8 个圆点，白点 + 深色描边 ⭐
+├── OverlayService.kt        # 前台服务：传感器回退、独立线程 + 60Hz 合并、息屏暂停、通知与「停止」⭐
+├── OverlayView.kt           # Canvas 自定义 View：左右各 8 个圆点，行程由边缘带几何推出 ⭐
 ├── OverlayManager.kt        # WindowManager 悬浮窗管理（不聚焦、不拦截触摸）⭐
-├── OverlayModule.kt         # RN 桥接：权限 / 启停 / isServiceRunning ⭐
+├── OverlayModule.kt         # RN 桥接：权限 / 启停 / 设置 / 通知权限 / 添加磁贴 / 通用偏好 ⭐
 ├── OverlayPackage.kt        # RN Package 注册 ⭐
+├── MotionCueTileService.kt  # Quick Settings 磁贴：下拉栏直接开关圆点 ⭐
+├── SettingsStore.kt         # SharedPreferences：自动模式 / 灵敏度 / 界面偏好的唯一真源 ⭐
 ├── SensorFusion.kt          # 世界坐标系融合、重力扣除回退、世界垂直轴偏航角速度 ⭐
-├── MotionCueEngine.kt       # 姿态自适应方向映射、死区、临界阻尼弹簧、自动模式 ⭐
+├── MotionCueEngine.kt       # 姿态自适应映射、死区、临界阻尼弹簧、迟滞、灵敏度 ⭐
 └── RotationMath.kt          # 旋转矢量 → 旋转矩阵（纯数学，与 Android 约定一致）
 
 # prebuild 后会被注入到：
@@ -77,23 +79,31 @@ native/android/
 
 > ⚠️ 不要直接修改 `android/` 下的 Kotlin 文件（prebuild 会重建）。所有原生改动请改 `native/android/`。
 > ⚠️ `.gitignore` 必须用根锚定 `/android/`，否则 `native/android/` 会被一并忽略（历史踩坑）。
+> ⚠️ 设置只有一个真源 `SettingsStore`（原生 SharedPreferences）：**不要**再引入 AsyncStorage，
+>    磁贴与前台服务都是原生组件，读不到 JS 存储。
 
 ### React Native 代码结构
 
 ```
 src/
+├── native/
+│   └── OverlayNative.ts            # 原生桥的类型化契约 + 错误码 + 灵敏度档位 ⭐
 ├── hooks/
-│   ├── useOverlayService.ts      # 控制原生服务（权限 / 启停 / 自动模式 / 运行状态同步）
-│   ├── useActivityRecognition.ts # 乘车检测（扣除重力的线性加速度）
-│   └── useVibrationService.ts    # 震动服务
+│   ├── useOverlayService.ts        # 控制原生服务（权限 / 启停 / 设置 / 状态同步）
+│   ├── OverlayServiceContext.tsx   # 服务状态单例上下文（跨页面共享，避免两份状态）⭐
+│   ├── usePreference.ts            # 原生 SharedPreferences 偏好 Hook ⭐
+│   ├── useActivityRecognition.ts   # 乘车检测（扣除重力的线性加速度）
+│   └── useVibrationService.ts      # 震动服务
 ├── screens/
-│   ├── VehicleMotionScreen.tsx   # 主功能屏（含自动模式开关）
-│   └── CarDetectionScreen.tsx    # 乘车检测屏
+│   ├── VehicleMotionScreen.tsx     # 主功能屏（自动模式 / 灵敏度 / 添加磁贴）
+│   └── CarDetectionScreen.tsx      # 乘车检测屏（震动偏好 + 乘车联动）
 └── utils/
-    └── constants.ts              # JS 层常量（乘车检测 / 震动；运动学参数在原生层）
+    └── constants.ts                # JS 层常量（乘车检测 / 震动；运动学参数在原生层）
 ```
 
 **注意**：实际运动处理在 **原生 Kotlin** 层（`OverlayService.kt` / `MotionCueEngine.kt`），JS 层只是服务控制。
+服务状态在 App 根部由 `OverlayServiceProvider` 提供，页面一律用 `useOverlayServiceContext()`，
+不要再各页面各自 `useOverlayService()`（那会产生两份权限/运行状态）。
 
 ### 运动提示算法（对标 Apple Vehicle Motion Cues）
 
@@ -142,7 +152,7 @@ src/
 bash tools/verify/run.sh
 ```
 
-覆盖 12 个场景：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式、重力回退、极端限幅、倾斜姿态下纯重力不泄漏。
+覆盖 14 个场景：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式淡入淡出、重力回退、极端限幅、倾斜姿态下纯重力不泄漏、转弯动态范围（防饱和）、自动模式迟滞。共 31 项断言。
 修改 `SensorFusion.kt` / `MotionCueEngine.kt` / `RotationMath.kt` 后必须全部断言通过。
 
 ### AndroidManifest 关键配置
@@ -154,7 +164,7 @@ bash tools/verify/run.sh
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
-<!-- 服务 -->
+<!-- 服务：前台服务（由 Config Plugin 注入） -->
 <service
   android:name=".OverlayService"
   android:exported="false"
@@ -162,6 +172,21 @@ bash tools/verify/run.sh
   <property
     android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
     android:value="Vehicle Motion Cues display to prevent motion sickness"/>
+</service>
+
+<!-- 服务：Quick Settings 磁贴（由 Config Plugin 注入） -->
+<service
+  android:name=".MotionCueTileService"
+  android:exported="true"
+  android:label="防晕车提示"
+  android:icon="@drawable/ic_stat_motion"
+  android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+  <intent-filter>
+    <action android:name="android.service.quicksettings.action.QS_TILE"/>
+  </intent-filter>
+  <meta-data
+    android:name="android.service.quicksettings.ACTIVE_TILE"
+    android:value="true"/>
 </service>
 ```
 
@@ -513,7 +538,7 @@ tsconfig.json              # TypeScript 配置
 index.ts                   # 入口
 App.tsx                    # 主组件
 src/                       # 所有 RN 代码
-native/android/            # 原生 Kotlin 源码（8 个文件，必须入库）⭐
+native/android/            # 原生 Kotlin 源码（10 个文件，必须入库）⭐
 plugins/                   # Config Plugin（prebuild 注入原生层）⭐
 tools/verify/              # 算法验证台（JVM 运行，无需真机）
 assets/                    # 图标资源（源文件由 tools/icons/render.mjs 生成）

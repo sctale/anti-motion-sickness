@@ -1,5 +1,63 @@
 # 更新日志 (Changelog)
 
+## [0.3.5] - 2026-10-18
+
+第三轮：**产品闭环**。补上 README 对标表里自己标着 ⚠️ 的两项，并把「两个功能各玩各的」连起来。
+
+### ✨ 新增
+
+- **Quick Settings 磁贴**（[`native/android/MotionCueTileService.kt`](./native/android/MotionCueTileService.kt)）：
+  下拉通知栏点一下就能开关圆点。此前唯一的关闭路径是「回到 App 点停止」，
+  而圆点正盖在整个屏幕上 —— 对标 Apple 的控制中心 / Google 的 Quick Settings 磁贴。
+  - `ACTIVE_TILE=true`：点击直接切换，不跳进 App
+  - 缺少悬浮窗权限时才回 App 引导授权（Android 14+ 走 `startActivityAndCollapse(PendingIntent)`）
+  - Android 13+ 提供「＋ 添加磁贴」按钮（`TileService.requestAddTileService`），
+    低版本给出「长按快捷设置面板手动拖入」的提示而不是没反应
+  - 磁贴声明由 Config Plugin 注入（`BIND_QUICK_SETTINGS_TILE` + `QS_TILE` intent-filter + 图标）
+- **灵敏度三档（低 / 中 / 高）**：改变「多大动作算满行程」，运行中即时生效。
+  只缩放满行程参考输入（0.55 rad/s / 3.5 / 3.0），不放大位移上限，
+  以免重新引入「引擎请求 40dp、View 只给 20dp」的静默裁剪。
+- **偏好持久化**：新增 `SettingsStore`（SharedPreferences）作为设置唯一真源，
+  自动模式、灵敏度、震动开关、震动频率、乘车联动都记得住。
+  刻意**不**用 AsyncStorage：磁贴与前台服务是原生组件，读不到 JS 存储，
+  而且省掉一个新依赖。JS 侧用 `useBooleanPreference` / `useStringPreference` 走同一份存储。
+- **乘车 → 圆点联动**：乘车检测页新增「乘车时自动开启圆点」开关，
+  检测到 `IN_VEHICLE` 且置信度 ≥ 60 时直接启动悬浮窗（仅在本页检测开启期间有效，界面已注明）。
+- **通知权限请求**：`requestNotificationPermission()`（Android 13+）。
+  通知被隐藏时用户就没法从通知栏停止服务，所以启动时顺带请求一次。
+- 首页 Vehicle Motion 卡片显示「圆点运行中」徽标，不用进二级页才知道当前状态。
+
+### ♻️ 重构
+
+- **服务状态改为单例上下文**（`OverlayServiceContext`）：以前每个页面各自
+  `useOverlayService()`，两份权限/运行状态可能不同步，且各自注册 AppState 监听。
+- **在 App 内返回不再停止服务**：圆点的用途就是盖在其他 App 上，翻页不该把它关掉；
+  停止只由「停止」按钮、通知栏动作和磁贴触发。界面文案同步说明。
+- `startService()` 不再接收 `autoMode` 参数 —— 设置只有一个真源，
+  服务每次 `onStartCommand` 从 `SettingsStore` 重读（磁贴、App、系统重启服务走同一路径）。
+  设置变更后重新投递启动命令，同时再次 `startForeground` 以满足 Android 8+ 的时限要求。
+- `OverlayModule` 新增 `getSettings` / `updateSettings` / `isOverlayShown` /
+  `canRequestAddTile` / `requestAddTile` / `getStringPref` / `setStringPref`，
+  并在 `src/native/OverlayNative.ts` 声明对应的 TS 契约（不再是 any）。
+- `useActivityRecognition`：`onActivityChanged` 改为可选并放进 ref
+  （调用方每次渲染换新函数会反复重建监听器）；删掉只写不读的 `accumulatorRef`；
+  魔法数字（2.0 / 60 / 30 / 10）抽到 `src/utils/constants.ts`。
+- 启动按钮文案 `⏸ 暂停` → `⏹ 停止`，与实际行为一致。
+
+### 🧪 验证
+
+- `tsc --noEmit` 无错误；`tools/verify/run.sh` 14 场景 31 断言全绿。
+- 本轮改动含新的原生组件（磁贴）与 manifest 注入，需真机确认：
+  磁贴是否出现在可添加列表、点击能否直接切换、Android 14+ 无权限时能否正确跳回 App 授权。
+
+### 📜 文档
+
+- README：核心功能新增 4 条，对标表两行 ⚠️ 转为 ✅/部分实现，项目结构补 5 个新文件。
+- AGENTS：原生/RN 结构、磁贴的 manifest 声明、设置单一真源的红线（不要再引 AsyncStorage）、
+  验证场景数 12 → 14。
+
+---
+
 ## [0.3.4] - 2026-10-18
 
 第二轮：**算法保真**。重点是让圆点在真实驾驶里看得出差别，而不是永远顶在钳位上。

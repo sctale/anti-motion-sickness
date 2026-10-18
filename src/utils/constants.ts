@@ -11,11 +11,18 @@ export const GRAVITY_G = 1.0;
 
 export const ACCEL_MOTION_THRESHOLD = 0.3;
 export const STILL_MOTION_THRESHOLD = 0.1;
+/** 「像车而不是像撞击/跌落」的合加速度上限（g），超过就当不可信 */
+export const ACCEL_MOTION_UPPER_BOUND = 2.0;
 
 export const ACTIVITY_VEHICLE_SAMPLING_WINDOW_MS = 3000;
 export const ACTIVITY_CONFIDENCE_INCREASE = 20;
 export const ACTIVITY_CONFIDENCE_DECREASE = 10;
 export const ACTIVITY_DEFAULT_SAMPLING_INTERVAL_MS = 500;
+/** 参与均值的历史样本数（约 3 次采样窗口） */
+export const ACTIVITY_HISTORY_SIZE = 10;
+/** 判定 IN_VEHICLE / STILL 的置信度分界 */
+export const ACTIVITY_IN_VEHICLE_CONFIDENCE = 60;
+export const ACTIVITY_STILL_CONFIDENCE = 30;
 
 // ===== 震动反馈（useVibrationService）=====
 export const VIBRATION_LOW_INTERVAL_MS = 3000;

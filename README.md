@@ -9,6 +9,10 @@
 - 🎨 **动态圆点** - 屏幕**左右两侧各 8 个圆点**（共 16 个），停留在边缘带内，不遮挡内容
 - 🧭 **姿态自适应** - 竖握、平放手机都能正确识别转向（基于世界坐标系偏航角速度）
 - 🤖 **自动模式** - 检测到车辆运动时淡入，静止约 10 秒后自动淡出（对标 Apple「自动」）
+- 🎚️ **灵敏度三档** - 低 / 中 / 高，改变「多大动作算满行程」，运行中即时生效
+- 🧩 **Quick Settings 磁贴** - 下拉通知栏一键开关，不用回 App（Android 13+ 可在应用内请求添加）
+- 💾 **偏好持久化** - 自动模式、灵敏度、震动设置存在原生 SharedPreferences，重启不丢
+- 🔗 **乘车联动** - 检测到 IN_VEHICLE 时可自动开启防晕圆点
 - ⚡ **实时响应** - SENSOR_DELAY_GAME 采样（~50-100Hz）+ 临界阻尼弹簧平滑
 - 🔋 **后台运行** - Foreground Service 后台持续运行，息屏自动暂停传感器省电
 - 📱 **Android 16 适配** - `specialUse` 前台服务、预测性返回、边缘到边缘安全区
@@ -22,8 +26,8 @@
 | 运动语义 | 与车辆加速度相反（模拟车窗外景物流向） | "match how the vehicle turns, speeds up, or brakes" | ✅ 同：加速下滑 / 刹车上滑 / 左转右移 / 右转左移 |
 | 传感器 | 加速度计 + 陀螺仪 | 手机运动传感器 | ✅ 旋转矢量 + 线性加速度 + 陀螺仪（世界坐标系） |
 | 自动显示 | 「自动」：检测到乘车显示，停车隐藏 | "Start in a moving vehicle" | ✅ 自动模式开关 + 10 秒静止淡出 |
-| 手动开关 | 控制中心 / 快捷指令 | Quick Settings 磁贴 | ⚠️ App 内开关（Quick Settings 磁贴待实现） |
-| 外观自定义 | 颜色 / 大小 / 数量 / 模式 | 透明度 / 配色 / 形状 / 随机化 | ⚠️ 固定白点 + 深色描边（对比度自适应），可配置项待实现 |
+| 手动开关 | 控制中心 / 快捷指令 | Quick Settings 磁贴 | ✅ App 内开关 + **Quick Settings 磁贴**（点击直接切换，Android 13+ 可在 App 内请求添加） |
+| 外观自定义 | 颜色 / 大小 / 数量 / 模式 | 透明度 / 配色 / 形状 / 随机化 | ⚠️ 固定白点 + 深色描边（对比度自适应）；已提供**灵敏度三档**，颜色/大小仍不可配 |
 | 系统集成 | 系统级合成器 | Play Services 系统级 | 第三方方案（悬浮窗 + 前台服务），与 KineStop 同架构 |
 
 方向语义依据：The Verge 实测（右转圆点左移、刹车圆点上滑）、Google 官方支持页、Popular Science（圆点以「路边景物掠过」的方式移动）等公开测评。
@@ -83,7 +87,7 @@ TYPE_APPLICATION_OVERLAY 窗口
 bash tools/verify/run.sh
 ```
 
-覆盖 12 个场景：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式淡入淡出、重力回退路径、极端输入限幅、倾斜姿态下纯重力不泄漏。
+覆盖 14 个场景 / 31 项断言：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式淡入淡出、重力回退路径、极端输入限幅、倾斜姿态下纯重力不泄漏、转弯动态范围（缓转/正常/急转必须看得出差别）、自动模式迟滞（短晃不显示 / 巡航维持 / 停车淡出）。
 
 ## 🤖 Android 16 适配要点
 
@@ -152,19 +156,25 @@ anti-car-sickness/
 ├── plugins/
 │   └── withOverlayModule.js             # Config Plugin：注入原生源码 / 服务 / Package ⭐
 ├── native/android/                      # 原生 Kotlin 源码（纳入版本管理）⭐
-│   ├── OverlayService.kt                # 前台服务（specialUse / 传感器回退 / 息屏暂停）
-│   ├── OverlayView.kt                   # 自定义 View（左右各 8 个圆点）
+│   ├── OverlayService.kt                # 前台服务（specialUse / 传感器回退 / 60Hz 合并 / 息屏暂停）
+│   ├── OverlayView.kt                   # 自定义 View（左右各 8 个圆点，几何决定可移动行程）
 │   ├── OverlayManager.kt                # TYPE_APPLICATION_OVERLAY 悬浮窗管理
-│   ├── OverlayModule.kt                 # RN 桥接模块（含启动状态校验）
+│   ├── OverlayModule.kt                 # RN 桥接（权限 / 启停 / 设置 / 通知与磁贴请求）
 │   ├── OverlayPackage.kt                # RN Package 注册
+│   ├── MotionCueTileService.kt          # Quick Settings 磁贴 ⭐
+│   ├── SettingsStore.kt                 # SharedPreferences：设置唯一真源（JS + 磁贴共用）⭐
 │   ├── SensorFusion.kt                  # 世界坐标系融合 + 偏航角速度 + 重力扣除
-│   ├── MotionCueEngine.kt               # 运动提示引擎（方向映射 / 弹簧 / 自动模式）
+│   ├── MotionCueEngine.kt               # 运动提示引擎（方向映射 / 弹簧 / 迟滞 / 灵敏度）
 │   └── RotationMath.kt                  # 旋转矢量 → 旋转矩阵（纯数学）
 ├── tools/verify/                        # 纯 Kotlin 算法验证台（JVM 运行，无需真机）
 ├── android/                             # prebuild 生成（已 gitignore）
 ├── src/
+│   ├── native/
+│   │   └── OverlayNative.ts             # 原生桥的类型化契约 + 错误码翻译 ⭐
 │   ├── hooks/
-│   │   ├── useOverlayService.ts         # 服务控制 Hook（悬浮窗权限 / 启停）
+│   │   ├── useOverlayService.ts         # 服务控制 Hook（权限 / 启停 / 设置）
+│   │   ├── OverlayServiceContext.tsx    # 服务状态单例上下文（跨页共享）⭐
+│   │   ├── usePreference.ts             # 原生 SharedPreferences 偏好 Hook ⭐
 │   │   ├── useActivityRecognition.ts    # 乘车检测 Hook（扣除重力的线性加速度）
 │   │   └── useVibrationService.ts       # 震动服务 Hook
 │   ├── screens/
