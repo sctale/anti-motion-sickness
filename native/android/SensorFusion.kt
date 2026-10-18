@@ -23,6 +23,7 @@ class SensorFusion(
 
     private val rotationMatrix = RotationMath.identity()
     private val gravityEstimate = floatArrayOf(0f, 0f, 0f)
+    private var gravityEstimated = false
     private val smoothedHorizontal = floatArrayOf(0f, 0f, 0f)
     private var smoothedYawRate = 0f
     private var initialized = false
@@ -92,6 +93,9 @@ class SensorFusion(
     fun reset() {
         System.arraycopy(RotationMath.identity(), 0, rotationMatrix, 0, 9)
         gravityEstimate.fill(0f)
+        // 重力低通估计必须一起归零：否则 reset 后第一帧会算出
+        // 「加速度 − 0」= 含全部重力（≈9.8 m/s²）的假读数，圆点瞬间被打满
+        gravityEstimated = false
         smoothedHorizontal.fill(0f)
         smoothedYawRate = 0f
         initialized = false
@@ -133,8 +137,6 @@ class SensorFusion(
             accel[2] - gravityEstimate[2]
         )
     }
-
-    private var gravityEstimated = false
 
     private fun ema(previous: Float, current: Float, alpha: Float): Float =
         previous + alpha * (current - previous)

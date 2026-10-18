@@ -38,6 +38,7 @@ fun main() {
     scenarioGravityFallback(upright)
     scenarioHeadingEast()
     scenarioLimits(upright)
+    scenarioTiltedGravityOnly()
 
     println()
     if (failures == 0) {
@@ -185,12 +186,57 @@ private fun scenarioHeadingEast() {
     check("车头朝东加速 → 圆点向下（offsetYdp > 20）", out.offsetYdp > 20f)
 }
 
-private fun scenarioLimits(rv: FloatArray) {
-    println("\n[场景 10] 极端输入（加速 8 m/s² + 偏航 1.5 rad/s）")
+private fun scenarioLimits(rv: FloatArray) {    println("\n[场景 10] 极端输入（加速 8 m/s² + 偏航 1.5 rad/s）")
     val out = run(rv, worldAccel = floatArrayOf(-6f, 8f, 0f), yawRate = 1.5f, seconds = 2f)
     report(out)
     check("水平位移被限制在 ±40dp 内", kotlin.math.abs(out.offsetXdp) <= 40.01f)
     check("垂直位移被限制在 ±48dp 内", kotlin.math.abs(out.offsetYdp) <= 48.01f)
+}
+
+/**
+ * 场景 12：倾斜姿态 + 只有加速度计（含重力），且中途 reset。
+ *
+ * 关键性质：世界坐标系里的重力是纯垂直向量，投影到水平面必然为 0，
+ * 所以即使重力扣除失效（reset 后低通估计尚未重新播种），
+ * 也不会把 9.8 m/s² 的重力漏进圆点位移。
+ * 这条断言用来锁住「姿态再歪也不会因为重力而乱飘」这一行为。
+ */
+private fun scenarioTiltedGravityOnly() {
+    println("\n[场景 12] 倾斜 45°+ 只有加速度计（含重力）+ 中途 reset（期望：圆点完全不动）")
+    // 绕世界 X 轴（东）倾斜 45°：旋转矢量 = (sin22.5°, 0, 0)
+    val tilted = floatArrayOf(0.3826834f, 0f, 0f)
+    val gravityWorld = floatArrayOf(0f, 0f, -9.81f)
+    val accelDevice = deviceFromWorld(tilted, gravityWorld)
+    println("        · 设备加速度计读数 = ${vec(accelDevice)} m/s²（含全部重力）")
+
+    val fusion = SensorFusion()
+    val engine = MotionCueEngine()
+    var t = 0L
+    var worstX = 0f
+    var worstY = 0f
+
+    fun drive(frames: Int) {
+        repeat(frames) {
+            t += 20
+            // linearAccel = null、gravity = null → 走加速度计低通估重力的兜底路径
+            val f = fusion.update(tilted, accelDevice, null, null, floatArrayOf(0f, 0f, 0f))
+            val out = engine.update(f, t)
+            worstX = maxOf(worstX, kotlin.math.abs(out.offsetXdp))
+            worstY = maxOf(worstY, kotlin.math.abs(out.offsetYdp))
+        }
+    }
+
+    drive(150) // 3 秒
+    fusion.reset()
+    engine.reset()
+    drive(50) // reset 后 1 秒（重力估计尚未重新播种的窗口）
+
+    val out = engine.currentOutput()
+    report(out)
+    println("        · 全程最大 |offsetXdp|=${fmt(worstX)}, |offsetYdp|=${fmt(worstY)}")
+    check("重力不会被当成车辆运动（水平方向不动）", worstX < 2f)
+    check("重力不会被当成车辆运动（垂直方向不动）", worstY < 2f)
+    check("纯重力姿态下自动模式保持隐藏", out.alpha < 0.01f)
 }
 
 // ---------------- 工具 ----------------
