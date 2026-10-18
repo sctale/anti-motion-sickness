@@ -13,7 +13,7 @@
 | 原生层 | Kotlin 2.x (ForegroundService、Custom View、WindowManager) |
 | 传感器 | Android SensorManager (TYPE_ROTATION_VECTOR) |
 | 悬浮窗 | TYPE_APPLICATION_OVERLAY 系统级窗口 |
-| 最低支持 | Android 6.0 (API 23) |
+| 最低支持 | Android 7.0 (API 24)（实测 APK `sdkVersion:'24'`，由 RN 0.85 决定） |
 | 目标 | Android 16 (API 36) |
 
 ---

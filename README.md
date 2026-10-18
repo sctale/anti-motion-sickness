@@ -110,7 +110,7 @@ bash tools/verify/run.sh
 > **项目采用真机测试策略**：开发者本地构建 → 上传 GitHub Release → 用户手机真机测试。
 
 1. 访问 [Releases](https://github.com/sctale/anti-motion-sickness/releases) 下载最新版本的 APK
-2. 在 Android 设备上安装（Android 6.0+，推荐 Android 14+）
+2. 在 Android 设备上安装（Android 7.0+，推荐 Android 14+）
 3. **首次安装**：允许"安装来自未知来源的应用"
 4. 启动 App → 选择"启动 Vehicle Motion"或"启动乘车检测"
 5. **首次启动**：授予"显示在其他应用上层"权限
@@ -140,7 +140,7 @@ bash tools/verify/run.sh
 
 ## 📱 兼容性
 
-- **最低 Android 版本**: Android 6.0 (API 23)
+- **最低 Android 版本**: Android 7.0 (API 24)（以 APK 的 `sdkVersion` 为准）
 - **目标 Android 版本**: Android 16 (API 36)
 - **推荐 Android 版本**: Android 14+ (API 34+)
 - **传感器要求**: 加速度计 + 陀螺仪
