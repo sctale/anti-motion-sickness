@@ -308,11 +308,15 @@ if (-not $SkipPrebuild -and -not $UploadOnly) {
     Write-Step "4/8 Prebuild 生成原生代码"
     Push-Location $ProjectRoot
     try {
-        npx expo prebuild --platform android --no-install
+        # 必须 --clean：不 clean 时 android/ 会被复用，历史手改的配置长期滞留、
+        # 与 app.json 悄悄漂移。实测踩过：gradle.properties 里 newArchEnabled 停在 false，
+        # RN 0.85 以旧架构启动新运行时 → 点图标直接闪退。
+        # 原生源码与配置项现在全部由 Config Plugin 重新注入，clean 是安全的。
+        npx expo prebuild --platform android --no-install --clean
         if ($LASTEXITCODE -ne 0) {
             throw "prebuild 失败"
         }
-        Write-Success "prebuild 完成"
+        Write-Success "prebuild 完成（--clean，原生配置与 app.json 一致）"
 
         # 陈旧原生源码守卫：Config Plugin 会按清单清理上一次注入、本次已删除的 .kt。
         # 如果仍有「不在 native/android 里、也不是模板文件」的 .kt 残留，说明注入链有问题，

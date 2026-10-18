@@ -1,5 +1,46 @@
 # 更新日志 (Changelog)
 
+## [0.3.9] - 2026-10-18
+
+### 🔴 启动闪退的根因：原生配置与 `app.json` 漂移
+
+`android/` 是 prebuild 的复用目录，历史上手改进去的配置一直没被清掉，
+和 `app.json` 已经对不上了。实测对比（`--clean` 前后同一份 `gradle.properties`）：
+
+| 配置项 | 陈旧 `android/`（v0.3.3–v0.3.8 的构建） | `--clean` 后（= app.json 声明） |
+|---|---|---|
+| `newArchEnabled` | **false** | **true** |
+| `edgeToEdgeEnabled` | true（v0.3.0 起 app.json 已删除） | 由模板决定 |
+| `org.gradle.projectcachedir` | `d:/V-Coding/anti-car-sickness-rn/.gradle-cache`（**该目录已被删除**） | 无 |
+| `android.ndkVersion` | 手写 26.1.10909125 | 无 |
+
+RN 0.85 已经不支持旧架构，用 `newArchEnabled=false` 启动新运行时，就是
+「装得上、图标在、点开就没了」。之前几版 APK 全部踩在这条上。
+
+### 🛠 修复
+
+- **`release.ps1` 的 prebuild 固定带 `--clean`**：干净工程完全由当前
+  `app.json` + Config Plugin 生成，杜绝再漂移。
+- **本机需要的构建规避项收进 Config Plugin**（`withLocalBuildWorkarounds`）：
+  `kotlin.daemon.enabled=false` 与指向**项目内** `.gradle-cache` 的
+  `org.gradle.projectcachedir`。以前它们是手改在 `android/` 里的，
+  一旦 `--clean` 就丢、不 clean 又会滞留成隐患，现在每次生成都会重新注入。
+- 插件清理陈旧文件时不再谎报「已清理」（文件本来不存在就不打印）。
+
+### 📜 文档
+
+- AGENTS 新增「点图标就闪退（原生配置与 app.json 漂移）」排查条目，
+  附一条不用真机就能判定的 `grep` 命令；手动构建与快速参考里的 prebuild 命令统一加 `--clean`。
+
+### 🧪 验证
+
+- `--clean` 后 `gradle.properties` 三项均正确；`MainApplication.kt` 里
+  `add(OverlayPackage())` 与 `CrashCapture.install(this)` 各出现 1 次（幂等）；
+  manifest 中磁贴声明 1 条；`tsc` 与 14 场景算法验证通过。
+- `release.ps1` 新增注入校验：任一项缺失即中止构建，不再依赖「插件跑完了」这种弱信号。
+
+---
+
 ## [0.3.8] - 2026-10-18
 
 针对「启动直接闪退」的一版：**图标换成素描简图**，并把「崩溃原因看不见」这个根本障碍解决掉。

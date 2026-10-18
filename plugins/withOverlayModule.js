@@ -4,6 +4,7 @@ const {
   withDangerousMod,
   withAndroidManifest,
   withMainApplication,
+  withGradleProperties,
 } = require('@expo/config-plugins');
 
 const DEFAULT_PACKAGE = 'com.anonymous.anticarsicknessrn';
@@ -341,10 +342,48 @@ function withQuickSettingsTile(config) {
   });
 }
 
+/**
+ * 本机（Windows + 提权环境）构建所需的 gradle.properties 规避项。
+ *
+ * 这两项以前是直接手改 android/ 里的文件，于是：
+ *   - 一旦 prebuild --clean 就全丢，构建又踩权限问题；
+ *   - 反过来，不 clean 时它会长期滞留，让 android/ 与 app.json 悄悄漂移
+ *     （实测漂移出的问题：newArchEnabled 停在 false，RN 0.85 用旧架构启动直接闪退；
+ *      projectcachedir 还指向早已删除的 anti-car-sickness-rn 目录）。
+ * 放进 Config Plugin 后，干净工程也能稳定带上这两项。
+ */
+function withLocalBuildWorkarounds(config) {
+  return withGradleProperties(config, (cfg) => {
+    const items = cfg.modResults;
+    const setProperty = (key, value) => {
+      const existing = items.find(
+        (item) => item.type === 'property' && item.key === key
+      );
+      if (existing) {
+        existing.value = String(value);
+      } else {
+        items.push({ type: 'property', key, value: String(value) });
+      }
+    };
+
+    setProperty('kotlin.daemon.enabled', 'false');
+    setProperty(
+      'org.gradle.projectcachedir',
+      path
+        .join(cfg.modRequest.projectRoot, '.gradle-cache')
+        .split(path.sep)
+        .join('/')
+    );
+
+    return cfg;
+  });
+}
+
 module.exports = function withOverlayModule(config) {
   config = withOverlayKotlinSources(config);
   config = withOverlayService(config);
   config = withQuickSettingsTile(config);
   config = withOverlayPackage(config);
+  config = withLocalBuildWorkarounds(config);
   return config;
 };

@@ -261,7 +261,7 @@ bash tools/verify/run.sh
 2. 升级 `app.json` / `package.json` 版本号，按 `major*10000+minor*100+patch` 重算 `versionCode`
 3. 在 `CHANGELOG.md` 添加新版本占位条目，提交版本号变更
 4. **前置检查**：`tsc --noEmit` + `bash tools/verify/run.sh`，任一失败即中止（`-SkipChecks` 可跳过）
-5. 执行 `npx expo prebuild --platform android --no-install`
+5. 执行 `npx expo prebuild --platform android --no-install --clean`（杜绝原生配置与 app.json 漂移）
 6. 校验原生注入结果：`android/` 里不应有 `native/android` 之外的残留 `.kt`
 7. 执行 `replace_icons.ps1` 替换图标
 8. 执行 `gradlew assembleRelease` 构建 APK
@@ -301,11 +301,12 @@ bash tools/verify/run.sh
 ### 1. Prebuild
 
 ```powershell
-npx expo prebuild --platform android --no-install
+npx expo prebuild --platform android --no-install --clean
 ```
 
-- 首次或修改了 Config Plugin 时必须执行
-- **不要使用 `--clean`**，除非需要完全重建
+- **一律带上 `--clean`**（`release.ps1` 已内置）：不 clean 会复用旧的 `android/`，
+  历史手改的配置长期滞留、与 `app.json` 悄悄漂移（实测踩过 `newArchEnabled` 停在 false 导致启动闪退，
+  详见「常见问题」）。原生源码与构建规避项现在都由 Config Plugin 重新注入，clean 是安全的。
 - 修改 `app.json` 或 `package.json` 后必须 prebuild 一次
 
 **⚠️ 警告**：prebuild 会重置 `android/app/src/main/res/mipmap-*/ic_launcher*.webp` 为 Expo 默认图标，需要运行 `replace_icons.ps1` 恢复自定义图标。
@@ -451,6 +452,26 @@ $env:GH_TOKEN = "ghp_xxx"
 - 检查 `OverlayPackage` 是否在 `MainApplication` 中注册
 - 真机可以用 `adb logcat` 抓 stacktrace（开发机调试用）
 
+### 点图标就闪退（原生配置与 app.json 漂移）
+
+- 现象：APK 装得上、图标在、点开就没了，连一屏错误都看不到。
+- 根因（本项目实测）：`android/` 被 prebuild 复用，`gradle.properties` 里留着旧的
+  `newArchEnabled=false`，而 `app.json` 写的是 `true`。RN 0.85 已不支持旧架构，
+  以旧架构启动新运行时会在启动期崩。同类残留还有 `edgeToEdgeEnabled`、
+  指向已删除目录的 `org.gradle.projectcachedir`、手写的 `android.ndkVersion`。
+- 判定方法（不用真机就能看出来）：
+
+```bash
+grep -nE "newArchEnabled|edgeToEdge|projectcachedir" android/gradle.properties
+# 与 app.json 不一致 → 就是这个坑
+```
+
+- 解决：`npx expo prebuild --platform android --no-install --clean`（`release.ps1` 已默认带上）。
+  本机需要的 `kotlin.daemon.enabled=false` 与项目内 `projectcachedir` 已收进
+  `withLocalBuildWorkarounds`，clean 后会自动重新注入，不会再丢。
+- 兜底：万一还有别的启动崩溃，`CrashCapture` 会把上次的堆栈显示在首页，
+  截图发 Issue 即可定位（不要再靠「闪退」两个字猜）。
+
 ### 含中文的 .ps1 在 Windows PowerShell 5.1 下解析失败
 
 - 现象：`powershell -File release.ps1` 报一串「表达式或语句中包含意外的标记」，行号指向中文字符串附近
@@ -494,7 +515,7 @@ $e.Count   # 必须是 0
 .\release.ps1 -BumpType none -UploadOnly  # 只重传当前版本
 
 # ===== 手动分步 =====
-npx expo prebuild --platform android --no-install
+npx expo prebuild --platform android --no-install --clean
 powershell -ExecutionPolicy Bypass -File replace_icons.ps1
 cd android; .\gradlew assembleRelease
 & "$env:LOCALAPPDATA\Android\Sdk\build-tools\34.0.0\aapt.exe" dump badging android\app\build\outputs\apk\release\app-release.apk | Select-String "package"
