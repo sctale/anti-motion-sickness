@@ -24,6 +24,10 @@ export interface OverlayServiceHook {
   reloadSettings: () => Promise<void>;
   /** 请求通知权限，返回是否已授予 */
   requestNotificationPermission: () => Promise<boolean>;
+  /** 是否已被允许忽略电池优化（null = 未知/不支持查询） */
+  batteryExempt: boolean | null;
+  /** 打开系统电池优化设置页 */
+  openBatterySettings: () => Promise<void>;
   /** 系统是否支持应用内添加 Quick Settings 磁贴 */
   canRequestAddTile: boolean;
   /** 弹出系统「添加磁贴」确认框 */
@@ -38,6 +42,7 @@ export function useOverlayService(): OverlayServiceHook {
   const [isRunning, setIsRunning] = useState(false);
   const [settings, setSettings] = useState<OverlaySettings>(DEFAULT_SETTINGS);
   const [canRequestAddTile, setCanRequestAddTile] = useState(false);
+  const [batteryExempt, setBatteryExempt] = useState<boolean | null>(null);
 
   const isSupported = OverlayModule !== null;
 
@@ -118,6 +123,24 @@ export function useOverlayService(): OverlayServiceHook {
     }
   }, []);
 
+  const refreshBatteryExempt = useCallback(async (): Promise<void> => {
+    if (!OverlayModule) return;
+    try {
+      setBatteryExempt(await OverlayModule.isIgnoringBatteryOptimizations());
+    } catch {
+      setBatteryExempt(null);
+    }
+  }, []);
+
+  const openBatterySettings = useCallback(async (): Promise<void> => {
+    if (!OverlayModule) return;
+    try {
+      await OverlayModule.openBatteryOptimizationSettings();
+    } catch (error) {
+      throw new Error(describeOverlayError(error));
+    }
+  }, []);
+
   const startService = useCallback(async (): Promise<void> => {
     if (!OverlayModule) throw new Error(MODULE_MISSING);
     try {
@@ -165,6 +188,7 @@ export function useOverlayService(): OverlayServiceHook {
     checkPermission();
     reloadSettings();
     syncServiceState();
+    refreshBatteryExempt();
 
     if (OverlayModule) {
       OverlayModule.canRequestAddTile()
@@ -179,6 +203,7 @@ export function useOverlayService(): OverlayServiceHook {
         checkPermission();
         syncServiceState();
         reloadSettings();
+        refreshBatteryExempt();
       }
     });
 
@@ -186,7 +211,7 @@ export function useOverlayService(): OverlayServiceHook {
     // 圆点的用途就是盖在别的 App 上，用户在 App 内切换页面不应该把提示关掉；
     // 停止只由「停止」按钮、通知栏动作和 Quick Settings 磁贴触发。
     return () => subscription.remove();
-  }, [checkPermission, reloadSettings, syncServiceState]);
+  }, [checkPermission, reloadSettings, syncServiceState, refreshBatteryExempt]);
 
   return {
     hasPermission,
@@ -202,5 +227,7 @@ export function useOverlayService(): OverlayServiceHook {
     requestNotificationPermission,
     canRequestAddTile,
     requestAddTile,
+    batteryExempt,
+    openBatterySettings,
   };
 }

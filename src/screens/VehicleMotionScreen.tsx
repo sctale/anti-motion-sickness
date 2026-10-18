@@ -46,6 +46,8 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
     requestNotificationPermission,
     canRequestAddTile,
     requestAddTile,
+    batteryExempt,
+    openBatterySettings,
   } = useOverlayServiceContext();
 
   const handleStart = useCallback(async () => {
@@ -107,6 +109,16 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
       setTileHint((e as Error).message);
     }
   }, [requestAddTile]);
+
+  const handleOpenBatterySettings = useCallback(async (): Promise<void> => {
+    setTileHint(null);
+    try {
+      await openBatterySettings();
+      setTileHint('请在系统页面选择「不限制 / 允许后台运行」，回到 App 后本页会自动复查');
+    } catch (e) {
+      setTileHint((e as Error).message);
+    }
+  }, [openBatterySettings]);
 
   // 返回不再停服务：圆点的用途就是盖在其他 App 上，
   // 在 App 内翻页不应该把提示关掉（停止交给「停止」按钮 / 通知栏 / 磁贴）
@@ -227,6 +239,14 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
           {isSupported && canRequestAddTile && (
             <TouchableOpacity style={styles.tileButton} onPress={handleAddTile}>
               <Text style={styles.tileButtonText}>＋ 添加快捷设置磁贴</Text>
+            </TouchableOpacity>
+          )}
+          {isSupported && batteryExempt === false && (
+            <TouchableOpacity
+              style={styles.tileButton}
+              onPress={handleOpenBatterySettings}
+            >
+              <Text style={styles.tileButtonText}>🔋 允许后台常驻（防止圆点被系统冻结）</Text>
             </TouchableOpacity>
           )}
           {tileHint !== null && (

@@ -40,6 +40,10 @@ export interface OverlayNativeModule {
   canRequestAddTile(): Promise<boolean>;
   /** 弹出系统的「添加磁贴」确认框 */
   requestAddTile(): Promise<boolean>;
+  /** 是否已被允许忽略电池优化（国产 ROM 冻结后台服务的主因） */
+  isIgnoringBatteryOptimizations(): Promise<boolean>;
+  /** 打开系统的「忽略电池优化」设置页；resolve false = 系统未提供该入口 */
+  openBatteryOptimizationSettings(): Promise<boolean>;
   /** 通用界面偏好（震动开关、频率等），与设置同一份存储 */
   getStringPref(key: string, fallback: string): Promise<string>;
   setStringPref(key: string, value: string): Promise<boolean>;

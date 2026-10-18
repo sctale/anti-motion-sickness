@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
 import androidx.core.app.ActivityCompat
@@ -265,6 +266,71 @@ class OverlayModule(reactContext: ReactApplicationContext) :
         } catch (e: Exception) {
             promise.reject("ERR_SET_PREF", e)
         }
+    }
+
+    /**
+     * 是否已被允许忽略电池优化。
+     *
+     * 这个产品最常见的故障其实不是启动崩溃，而是「圆点用着用着没了」：
+     * 国产 ROM 的省电策略会把常驻前台服务连同传感器一起冻结。
+     * 没有这个查询接口时，用户只能以为是 App 坏了。
+     */
+    @ReactMethod
+    fun isIgnoringBatteryOptimizations(promise: Promise) {
+        val context = reactApplicationContext
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                // Android 5.x 没有这套机制，视为已豁免
+                promise.resolve(true)
+                return
+            }
+            val manager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+            promise.resolve(manager.isIgnoringBatteryOptimizations(context.packageName))
+        } catch (e: Exception) {
+            promise.reject("ERR_BATTERY_STATE", e)
+        }
+    }
+
+    /**
+     * 打开「忽略电池优化」的系统设置页。
+     *
+     * 部分 ROM（小米、华为）会拦 ACTION_IGNORE_BATTERY_OPTIMIZATIONS_SETTINGS，
+     * 或 Google Play 对该跳转有政策限制 —— 所以这里失败时退回应用详情页，
+     * 并且只由用户主动点击触发，不做启动时弹窗。
+     */
+    @ReactMethod
+    fun openBatteryOptimizationSettings(promise: Promise) {
+        val context = reactApplicationContext
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            promise.resolve(false)
+            return
+        }
+        val candidates = listOf(
+            Intent(
+                Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+            ),
+            Intent(
+                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse("package:" + context.packageName)
+            ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) },
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:" + context.packageName)
+            ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        )
+        for (intent in candidates) {
+            try {
+                context.startActivity(intent)
+                promise.resolve(true)
+                return
+            } catch (_: Exception) {
+                // 换下一个入口
+            }
+        }
+        promise.reject(
+            "ERR_BATTERY_SETTINGS",
+            "系统未提供可跳转的电池设置页，请在「设置 → 应用 → 防晕车助手 → 电池」里手动允许后台运行"
+        )
     }
 
     private fun toMap(settings: SettingsStore.Settings): WritableMap =

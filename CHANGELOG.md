@@ -1,5 +1,33 @@
 # 更新日志 (Changelog)
 
+## [0.3.10] - 2026-10-18
+
+### ✨ 新增：后台常驻引导（这个产品最常见的真实故障不是闪退，而是「圆点用着用着没了」）
+
+国产 ROM 的省电策略会冻结常驻前台服务，连同传感器一起停掉；此前 App 既查不到状态、
+也没有任何入口让用户豁免，只能被当成「App 坏了」。
+
+- `OverlayModule.isIgnoringBatteryOptimizations()`：查当前是否已豁免（Android 6 以下视为已豁免）。
+- `OverlayModule.openBatteryOptimizationSettings()`：依次尝试
+  `ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS` → `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`
+  → 应用详情页，全部失败时给出「请到设置里手动允许后台运行」的可读原因
+  （部分 ROM 会拦这些跳转，所以是逐个降级而不是假定可用）。
+- Vehicle Motion 面板：查询结果为「未豁免」时才出现「🔋 允许后台常驻」按钮
+  （已豁免或系统不支持查询都不显示，避免无意义的提示）；只在用户主动点击时跳转，不做启动弹窗。
+- 每次回到前台复查豁免状态（与权限、服务状态同一批同步）。
+- `app.json` 增加 `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` 权限声明。
+
+### 🧪 核对
+
+- 对比 `--clean` 前后 APK 的权限集合：`VIBRATE` 由 expo-haptics 自带未丢失；
+  被清掉的 `WAKE_LOCK` / `HIGH_SAMPLING_RATE_SENSORS` / `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`
+  属于当时已无用的声明（前者本版按需重新加回）。
+- 原生启动路径复查：`OverlayPackage.createViewManagers` 返回 `emptyList()`，
+  新架构下不存在模板常见的 `UnsupportedOperationException` 急抛点。
+- `tsc --noEmit` 通过；算法验证台 14 场景 31 断言通过。
+
+---
+
 ## [0.3.9] - 2026-10-18
 
 ### 🔴 启动闪退的根因：原生配置与 `app.json` 漂移
