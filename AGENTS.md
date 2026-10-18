@@ -171,7 +171,7 @@ bash tools/verify/run.sh
 | 预测性返回手势 | `app.json` 中 `predictiveBackGestureEnabled: true` |
 | 边缘到边缘 | Android 16 强制执行（无需配置）；UI 用 `react-native-safe-area-context` 处理安全区 |
 | 前台服务类型 | `foregroundServiceType="specialUse"` + `PROPERTY_SPECIAL_USE_FGS_SUBTYPE`（Config Plugin 注入） |
-| 16KB 页面对齐 | Gradle/CMake 配置 `max-page-size=16384`（生成项目后需手动添加） |
+| 16KB 页面对齐 | 本项目无自有 C/C++ 源码（`.so` 来自 RN/Expo 依赖）；`release.ps1` 用 `zipalign -c -P 16 -v 4` 实测校验产物，未对齐则中止发布 |
 | 状态栏 | 各屏用 RN `StatusBar` 组件显式声明（`androidStatusBar` / `edgeToEdgeEnabled` 在新版 Expo 已失效，勿再使用） |
 
 ---

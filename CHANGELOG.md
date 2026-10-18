@@ -1,5 +1,68 @@
 # 更新日志 (Changelog)
 
+## [0.3.3] - 2026-10-18
+
+双轴代码审查（标准轴 + 规格轴）的第一轮修复，主题是**构建与运行链的确定性**。
+
+### 🐛 关键修复
+
+- **仓库自带代码打不出包（Critical）**：Config Plugin 注入原生源码时只复制、不清理，
+  `android/` 里残留 v0.2.x 的 `MotionAnalyzer.kt` / `PredictionEngine.kt`，其引用的
+  `MotionData` 类在新版 `SensorFusion.kt` 已删除。实测复现
+  `compileReleaseKotlin FAILED: Unresolved reference 'MotionData'`，
+  而 `release.ps1` 用的正是不带 `--clean` 的 prebuild。现在插件按注入清单
+  （`.overlay-injected.json`）+ 历史注入名单清理陈旧 `.kt`，模板自带的
+  `MainActivity` / `MainApplication` 不在名单内不会被误删。
+- **算法质量门从未执行（Critical）**：AGENTS 规定改算法必须跑 `tools/verify/run.sh`，
+  但脚本只认 PATH 上的全局 `kotlinc`，本机没有 → 这道门实际一直是跳过状态。
+  脚本现在按 `PATH → $KOTLIN_HOME → Android Studio 自带 Kotlin 发行版` 顺序查找，
+  并显式用 UTF-8 输出（Windows 控制台原本中文乱码）。
+- **iOS 假装可用**：`isSupported` 与 `checkPermission` 在非 Android 一律返回 true，
+  导致按钮可点、点了无事发生。现在未注入原生模块 / 非 Android 均为不支持，
+  界面直接说明原因。
+- **启动成功判定靠固定 450ms 猜测**：慢机型冷启动会被误报为「启动失败」。
+  改为有界轮询（100ms 一次、3s 超时），并区分权限被撤销 / 添加窗口失败 / 启动超时
+  三种可读原因（`OverlayModule.kt` 新增错误码，JS 侧 `describeOverlayError()` 翻译）。
+
+### ⚡ 性能 / 省电
+
+- **传感器管线移出主线程**：5 路 `SENSOR_DELAY_GAME`（50-100Hz）原本跑在 Service 主线程，
+  且每个传感器事件都做一次完整「融合 + 引擎 + 重绘」，同一批数据被重算 3-5 遍。
+  现在回调只存最新值，计算按 60Hz 合并（`OverlayService.TARGET_UI_HZ`），
+  中间数组复用并去掉每帧 `copyOf()` 分配，时间戳改用 `elapsedRealtime()`。
+- **息屏暂停重绘**：除了注销传感器，额外暂停悬浮窗绘制，避免亮屏瞬间画出一帧过期数据。
+- `startForeground` 显式携带 `specialUse` 类型（Android 14+），保留退回无类型调用的兜底。
+
+### ♻️ 重构
+
+- 新增 `src/native/OverlayNative.ts`：原生桥的类型化契约（替代 `NativeModules` 的 any）、
+  错误码常量与可读错误转换。
+- `SensorFusion.reset()` 补 `gravityEstimated = false`，让低通估重力重新播种（语义一致性）。
+- `release.ps1`：构建前自动跑 `tsc --noEmit` + 算法验证台；prebuild 后校验注入文件集；
+  aapt 按 build-tools 版本自动挑选（不再硬编码 34.0.0）；JSON/Markdown 写回改用无 BOM UTF-8
+  （PowerShell 5.1 的 `Set-Content -Encoding UTF8` 会写 BOM 并让 Expo 解析 app.json 失败）。
+
+### ✅ 发布校验
+
+- 新增 **16KB 页对齐实测**：`zipalign -c -P 16 -v 4` 直接校验 APK 产物，未对齐即中止发布。
+  此前 README 写「已在 Gradle 配置」、AGENTS 写「需手动添加」，两处描述互相矛盾且都未落实。
+
+### 🧪 验证
+
+- 算法验证台扩到 **12 场景 / 23 断言**，新增场景 12：45° 倾斜 + 只有加速度计（含全部重力）
+  + 中途 reset，锁住「纯重力投影到水平面必为 0，姿态再歪也不会让圆点自己飘」这一性质。
+- 本轮实测通过：`tsc --noEmit` 无错误、`tools/verify/run.sh` 12 场景全绿、
+  `compileReleaseKotlin` 由 FAILED 转为 BUILD SUCCESSFUL。
+
+### 📜 文档
+
+- 构建策略回到「全部本地构建，不使用 GitHub Actions」，删除 v0.3.0 引入的
+  `android-release.yml` 并恢复 `.gitignore` 对 `.github/` 的屏蔽。
+- 修正过期描述：AGENTS 真机测试步骤「圆点出现在屏幕上下边缘」→ 左右两侧；
+  验证场景数 11 → 12。
+
+---
+
 ## [0.3.2] - 2026-10-13
 
 ### 🎨 图标重做（第二版）

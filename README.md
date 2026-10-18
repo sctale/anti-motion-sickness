@@ -92,7 +92,7 @@ bash tools/verify/run.sh
 | 预测性返回手势 | `app.json` 中 `predictiveBackGestureEnabled: true` |
 | 边缘到边缘 | Android 16 强制执行；UI 使用 `react-native-safe-area-context` 处理安全区 |
 | 前台服务类型 | `foregroundServiceType="specialUse"` + `PROPERTY_SPECIAL_USE_FGS_SUBTYPE`（由 Config Plugin 注入） |
-| 16KB 页面对齐 | Gradle/CMake 配置 `max-page-size=16384` |
+| 16KB 页面对齐 | 本项目无自有 C/C++ 源码，`.so` 全部来自 RN/Expo 依赖；由 `release.ps1` 用 `zipalign -c -P 16` 对产物实测校验，未对齐则中止发布 |
 | 强制权限 | `SYSTEM_ALERT_WINDOW` + `POST_NOTIFICATIONS`（Android 13+） |
 | 状态栏 | 各屏用 `StatusBar` 组件显式声明（`androidStatusBar` 配置项在新版 Expo 已失效） |
 
@@ -179,7 +179,7 @@ anti-car-sickness/
 
 - 项目已切换为真机测试流程，不再依赖 AVD 模拟器
 - 部分国产 ROM（小米、华为、OPPO）需要在系统设置中额外允许后台运行
-- 16KB 页面设备需要原生 SO 库对齐（已在 Gradle 配置）
+- 16KB 页面对齐由 `release.ps1` 在发布前用 `zipalign -c -P 16` 实测校验（未对齐即中止）
 - 用户反馈通过 GitHub Issue 收集，开发者据此迭代修复并发布新版本
 
 ## 📝 版本历史

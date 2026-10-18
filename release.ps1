@@ -32,16 +32,17 @@ $PackageJson = Join-Path $ProjectRoot "package.json"
 $ApkSource = Join-Path $ProjectRoot "android\app\build\outputs\apk\release\app-release.apk"
 $ApkDest = Join-Path $ProjectRoot "anti-car-sickness-rn.apk"
 
-# Android SDK 工具路径（aapt 按 build-tools 版本从高到低自动挑选，避免硬编码 34.0.0）
+# Android SDK 工具路径（按 build-tools 版本从高到低挑，避免硬编码 34.0.0）
 $AndroidSdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } elseif ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { Join-Path $env:LOCALAPPDATA "Android\Sdk" }
-$Aapt = $null
+$BuildTools = $null
 if (Test-Path (Join-Path $AndroidSdk "build-tools")) {
-    $Aapt = Get-ChildItem -Path (Join-Path $AndroidSdk "build-tools") -Directory -ErrorAction SilentlyContinue |
+    $BuildTools = Get-ChildItem -Path (Join-Path $AndroidSdk "build-tools") -Directory -ErrorAction SilentlyContinue |
         Where-Object { Test-Path (Join-Path $_.FullName "aapt.exe") } |
-        Sort-Object Name -Descending |
+        Sort-Object { try { [Version]$_.Name } catch { [Version]"0.0.0" } } -Descending |
         Select-Object -First 1 -ExpandProperty FullName
-    $Aapt = Join-Path $Aapt "aapt.exe"
 }
+$Aapt = if ($BuildTools) { Join-Path $BuildTools "aapt.exe" } else { $null }
+$Zipalign = if ($BuildTools) { Join-Path $BuildTools "zipalign.exe" } else { $null }
 $Adb = Join-Path $AndroidSdk "platform-tools\adb.exe"
 
 # gh CLI 完整路径
@@ -331,7 +332,7 @@ if (-not (Test-Path $ApkSource)) {
 Copy-Item $ApkSource $ApkDest -Force
 Write-Success "已复制到: $ApkDest"
 
-if (Test-Path $Aapt) {
+if ($Aapt -and (Test-Path $Aapt)) {
     $aaptOutput = & $Aapt dump badging $ApkDest 2>&1 | Select-String "package:"
     Write-Host $aaptOutput
 
@@ -341,7 +342,23 @@ if (Test-Path $Aapt) {
         Write-Warn "APK versionName 与 app.json 不一致！请检查 android/app/build.gradle"
     }
 } else {
-    Write-Warn "未找到 aapt: $Aapt，跳过版本号验证"
+    Write-Warn "未找到 aapt（SDK: $AndroidSdk），跳过版本号验证"
+}
+
+# 16KB 页对齐校验：Android 15+ 的 16KB 设备装不上未对齐的 APK。
+# 之前 README/AGENTS 只是「声称已配置」，这里改成对产物做实测。
+if ($Zipalign -and (Test-Path $Zipalign)) {
+    $alignOut = & $Zipalign -c -P 16 -v 4 $ApkDest 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "APK 内全部 .so 已 16KB 页对齐 ✓"
+    } else {
+        $unaligned = $alignOut | Select-String -Pattern "lib/.*\.so" | Select-Object -First 8
+        Write-Err "APK 存在未 16KB 对齐的 so 库，Android 15+ 16KB 设备将无法安装（发布中止）："
+        $unaligned | ForEach-Object { Write-Host "  $_" }
+        exit 1
+    }
+} else {
+    Write-Warn "未找到 zipalign，跳过 16KB 对齐校验（build-tools 需 ≥ 34）"
 }
 
 # ============== 步骤 8: 推送到 GitHub Release ==============
