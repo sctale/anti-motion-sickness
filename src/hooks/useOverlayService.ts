@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { AppState, Linking } from 'react-native';
 import {
   DEFAULT_SETTINGS,
@@ -32,6 +32,11 @@ export interface OverlayServiceHook {
   canRequestAddTile: boolean;
   /** 弹出系统「添加磁贴」确认框 */
   requestAddTile: () => Promise<void>;
+  /**
+   * 「服务状态」与「用户实际所见」不一致时的说明（例如服务在跑但圆点被系统冻结），
+   * 一致时为 null。以前这种不一致会被静默吞掉，用户只会认为「App 坏了」。
+   */
+  serviceHint: string | null;
 }
 
 /** 原生模块缺失时的统一提示（避免「点了没反应」） */
@@ -43,13 +48,9 @@ export function useOverlayService(): OverlayServiceHook {
   const [settings, setSettings] = useState<OverlaySettings>(DEFAULT_SETTINGS);
   const [canRequestAddTile, setCanRequestAddTile] = useState(false);
   const [batteryExempt, setBatteryExempt] = useState<boolean | null>(null);
+  const [serviceHint, setServiceHint] = useState<string | null>(null);
 
   const isSupported = OverlayModule !== null;
-
-  const isRunningRef = useRef(false);
-  useEffect(() => {
-    isRunningRef.current = isRunning;
-  }, [isRunning]);
 
   const checkPermission = useCallback(async (): Promise<boolean> => {
     if (!OverlayModule) {
@@ -116,8 +117,16 @@ export function useOverlayService(): OverlayServiceHook {
     if (!OverlayModule) return;
     try {
       const running = await OverlayModule.isServiceRunning();
-      isRunningRef.current = running;
-      setIsRunning(running);
+      // 圆点是否真的挂在屏幕上比「服务在跑」更贴近用户所见：
+      // 前台服务被 ROM 冻结、或窗口被系统移除时，服务还活着但屏幕上什么都没有，
+      // 只查 isServiceRunning 就会一直显示「运行中」，用户只能认为 App 坏了。
+      const shown = running ? await OverlayModule.isOverlayShown() : false;
+      setIsRunning(shown);
+      setServiceHint(
+        running && !shown
+          ? '服务在运行，但圆点没有显示（常被系统省电策略冻结）。可点「启动」重新挂上，或按下方允许后台运行。'
+          : null
+      );
     } catch {
       /* 查询失败保持现状，等下次回到前台再同步 */
     }
@@ -146,12 +155,14 @@ export function useOverlayService(): OverlayServiceHook {
     try {
       // 原生侧会在「服务运行 + 悬浮窗挂上」后才 resolve，失败带原因 reject
       await OverlayModule.startService();
-      isRunningRef.current = true;
       setIsRunning(true);
+      setServiceHint(null);
     } catch (error) {
+      // 启动失败时不要留着上一次的「运行中」假象
+      await syncServiceState();
       throw new Error(describeOverlayError(error));
     }
-  }, []);
+  }, [syncServiceState]);
 
   const stopService = useCallback(async (): Promise<void> => {
     if (!OverlayModule) return;
@@ -160,11 +171,11 @@ export function useOverlayService(): OverlayServiceHook {
     } catch (error) {
       console.warn('Stop service error:', describeOverlayError(error));
     } finally {
-      // 无论原生调用结果如何，本地状态都要落到「已停止」
-      isRunningRef.current = false;
-      setIsRunning(false);
+      // 以原生真实状态收尾：直接写死「已停止」会在停止失败时
+      // 让圆点还挂在别的 App 上、界面却显示「▶ 启动」，用户完全不知道发生了什么
+      await syncServiceState();
     }
-  }, []);
+  }, [syncServiceState]);
 
   const requestNotificationPermission = useCallback(async (): Promise<boolean> => {
     if (!OverlayModule) return false;
@@ -229,5 +240,6 @@ export function useOverlayService(): OverlayServiceHook {
     requestAddTile,
     batteryExempt,
     openBatterySettings,
+    serviceHint,
   };
 }

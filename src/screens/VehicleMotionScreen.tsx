@@ -48,6 +48,7 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
     requestAddTile,
     batteryExempt,
     openBatterySettings,
+    serviceHint,
   } = useOverlayServiceContext();
 
   const handleStart = useCallback(async () => {
@@ -103,8 +104,9 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
   const handleAddTile = useCallback(async (): Promise<void> => {
     setTileHint(null);
     try {
+      // 原生只在系统回调「已添加 / 已存在」时才 resolve，所以成功文案不能说成「已发起请求」
       await requestAddTile();
-      setTileHint('已发起请求，请在系统弹窗中确认添加');
+      setTileHint('磁贴已添加到下拉快捷面板，点一下即可开关圆点');
     } catch (e) {
       setTileHint((e as Error).message);
     }
@@ -127,7 +129,7 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
   }, [onExit]);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
       <StatusBar
         barStyle="light-content"
         backgroundColor="#0F172A"
@@ -146,7 +148,8 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
         <View style={styles.statusCard}>
           <View style={[styles.statusDot, isRunning && styles.statusDotActive]} />
           <Text style={styles.statusText}>
-            {isRunning ? '运行中' : '已停止'}
+            {/* isRunning 现在代表「圆点真的挂在屏幕上」，说「运行中」会掩盖被冻结的情况 */}
+            {isRunning ? '圆点显示中' : '未显示'}
           </Text>
         </View>
 
@@ -235,6 +238,11 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
               {isRunning ? '⏹ 停止' : '▶ 启动'}
             </Text>
           </TouchableOpacity>
+
+          {/* 服务在跑但圆点不可见：以前这种不一致会被静默吞掉，界面一直显示「运行中」 */}
+          {serviceHint !== null && (
+            <Text style={styles.tileHint}>{serviceHint}</Text>
+          )}
 
           {isSupported && canRequestAddTile && (
             <TouchableOpacity style={styles.tileButton} onPress={handleAddTile}>

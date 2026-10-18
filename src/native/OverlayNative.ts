@@ -71,15 +71,33 @@ function resolveOverlayModule(): OverlayNativeModule | null {
 /** 非 Android、原生模块未注入、或读取时抛错 —— 一律为 null */
 export const OverlayModule: OverlayNativeModule | null = resolveOverlayModule();
 
-/** 原生侧 reject 的错误码，见 OverlayModule.kt */
+/** 原生侧 reject 的错误码，逐条对照 OverlayModule.kt（改原生错误码时同步这里） */
 export const OVERLAY_ERRORS = {
   NO_PERMISSION: 'ERR_NO_PERMISSION',
+  CHECK_PERMISSION: 'ERR_CHECK_PERMISSION',
+  OPEN_SETTINGS: 'ERR_OPEN_SETTINGS',
   PERMISSION_REVOKED: 'ERR_PERMISSION_REVOKED',
   OVERLAY_ADD_FAILED: 'ERR_OVERLAY_ADD_FAILED',
   START_TIMEOUT: 'ERR_START_TIMEOUT',
   START_SERVICE: 'ERR_START_SERVICE',
-  TILE_UNSUPPORTED: 'ERR_TILE_UNSUPPORTED',
+  /** 原生把失败原因拼进错误码：ERR_START_<REASON>，见 OverlayService.REASON_* */
+  START_FGS_DENIED: 'ERR_START_FOREGROUND_SERVICE_DENIED',
+  START_PIPELINE_FAILED: 'ERR_START_PIPELINE_FAILED',
+  START_PERMISSION_REVOKED: 'ERR_START_PERMISSION_REVOKED',
+  START_OVERLAY_ADD_FAILED: 'ERR_START_OVERLAY_ADD_FAILED',
+  STOP_SERVICE: 'ERR_STOP_SERVICE',
+  GET_SETTINGS: 'ERR_GET_SETTINGS',
+  UPDATE_SETTINGS: 'ERR_UPDATE_SETTINGS',
+  GET_PREF: 'ERR_GET_PREF',
+  SET_PREF: 'ERR_SET_PREF',
+  REQUEST_NOTIFICATIONS: 'ERR_REQUEST_NOTIFICATIONS',
   NO_ACTIVITY: 'ERR_NO_ACTIVITY',
+  TILE_UNSUPPORTED: 'ERR_TILE_UNSUPPORTED',
+  NO_STATUS_BAR_SERVICE: 'ERR_NO_STATUS_BAR_SERVICE',
+  TILE_NOT_ADDED: 'ERR_TILE_NOT_ADDED',
+  TILE_NOT_FOREGROUND: 'ERR_TILE_NOT_FOREGROUND',
+  REQUEST_ADD_TILE: 'ERR_REQUEST_ADD_TILE',
+  BATTERY_STATE: 'ERR_BATTERY_STATE',
 } as const;
 
 export type OverlayErrorCode = (typeof OVERLAY_ERRORS)[keyof typeof OVERLAY_ERRORS];
@@ -119,23 +137,49 @@ export function toSensitivityLevel(value: number): SensitivityLevel {
   return best;
 }
 
+/**
+ * 错误码 → 可读中文。
+ * 只维护这张表：原生新增 reject 码时在这里补一行，界面就不会露出英文异常串。
+ */
+const ERROR_TEXT: Record<string, string> = {
+  [OVERLAY_ERRORS.NO_PERMISSION]: '缺少悬浮窗权限，请先允许「显示在其他应用上层」',
+  [OVERLAY_ERRORS.CHECK_PERMISSION]: '检查悬浮窗权限时出错，请重试',
+  [OVERLAY_ERRORS.OPEN_SETTINGS]: '打不开系统授权页，请在系统设置中手动允许「显示在其他应用上层」',
+  [OVERLAY_ERRORS.PERMISSION_REVOKED]: '悬浮窗权限已被撤销，请重新授权',
+  [OVERLAY_ERRORS.OVERLAY_ADD_FAILED]: '悬浮窗添加失败，请确认已允许「显示在其他应用上层」',
+  [OVERLAY_ERRORS.START_TIMEOUT]: '前台服务启动超时，请检查通知权限与系统后台运行限制',
+  [OVERLAY_ERRORS.START_SERVICE]: '前台服务启动失败，请检查通知权限与系统后台运行限制',
+  [OVERLAY_ERRORS.STOP_SERVICE]: '停止服务时出错，可从通知栏或快捷磁贴关闭',
+  [OVERLAY_ERRORS.GET_SETTINGS]: '读取设置失败，本次仅在本机界面生效',
+  [OVERLAY_ERRORS.UPDATE_SETTINGS]: '保存设置失败，修改没有生效',
+  [OVERLAY_ERRORS.GET_PREF]: '读取偏好失败，已回到默认值',
+  [OVERLAY_ERRORS.SET_PREF]: '保存偏好失败，下次进入可能会恢复默认',
+  [OVERLAY_ERRORS.REQUEST_NOTIFICATIONS]: '无法弹出通知权限请求，请到系统设置里手动允许通知',
+  [OVERLAY_ERRORS.NO_ACTIVITY]: '当前界面不可用，请回到 App 内再试一次',
+  [OVERLAY_ERRORS.TILE_UNSUPPORTED]:
+    '当前系统版本不支持应用内添加磁贴，请在下拉快捷设置面板中手动拖入',
+  [OVERLAY_ERRORS.NO_STATUS_BAR_SERVICE]: '系统未提供快捷设置服务，无法应用内添加磁贴',
+  [OVERLAY_ERRORS.TILE_NOT_ADDED]: '磁贴未添加（系统拒绝了本次请求），可在下拉面板中手动拖入',
+  [OVERLAY_ERRORS.TILE_NOT_FOREGROUND]: '请在 App 前台时再试一次',
+  [OVERLAY_ERRORS.REQUEST_ADD_TILE]: '发起添加磁贴时出错，可在下拉面板中手动拖入',
+  [OVERLAY_ERRORS.BATTERY_STATE]: '无法查询后台运行限制状态',
+  [OVERLAY_ERRORS.START_FGS_DENIED]:
+    '系统拒绝该服务进入前台（常见于省电策略或通知被禁用），请在系统设置里允许本应用后台运行',
+  [OVERLAY_ERRORS.START_PIPELINE_FAILED]:
+    '运动提示计算连续失败，服务已自动停止；请反馈机型与系统版本以便定位',
+  [OVERLAY_ERRORS.START_PERMISSION_REVOKED]: '悬浮窗权限已被系统撤销，服务已停止',
+  [OVERLAY_ERRORS.START_OVERLAY_ADD_FAILED]: '悬浮窗没能挂上，请重新授权「显示在其他应用上层」',
+};
+
 /** 把原生 reject（code/message）转成可读中文 */
 export function describeOverlayError(error: unknown): string {
   const e = error as { code?: string; message?: string } | undefined;
   if (!e) return '未知错误';
+
+  // 先按错误码查表：原生用 reject(code, throwable) 的形式报错时，message 是英文异常串，
+  // 直接显示它等于把堆栈甩给用户看。
+  const mapped = e.code ? ERROR_TEXT[e.code] : undefined;
+  if (mapped) return mapped;
   if (e.message) return e.message;
-  switch (e.code) {
-    case OVERLAY_ERRORS.NO_PERMISSION:
-      return '缺少悬浮窗权限';
-    case OVERLAY_ERRORS.PERMISSION_REVOKED:
-      return '悬浮窗权限已被撤销，请重新授权';
-    case OVERLAY_ERRORS.OVERLAY_ADD_FAILED:
-      return '悬浮窗添加失败，请确认已允许「显示在其他应用上层」';
-    case OVERLAY_ERRORS.START_TIMEOUT:
-      return '前台服务启动超时，请检查通知权限与系统后台运行限制';
-    case OVERLAY_ERRORS.TILE_UNSUPPORTED:
-      return '当前系统版本不支持应用内添加磁贴，请在下拉快捷设置面板中手动拖入';
-    default:
-      return e.code ?? '未知错误';
-  }
+  return e.code ?? '未知错误';
 }

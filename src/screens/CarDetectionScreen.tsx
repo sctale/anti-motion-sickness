@@ -94,8 +94,18 @@ export const CarDetectionScreen: React.FC<CarDetectionScreenProps> = ({ onExit }
       return;
     }
     if (autoStartedRef.current || cuesRunning) return;
-    if (!cuesSupported || hasPermission === false) {
-      setLinkageHint('检测到乘车，但缺少悬浮窗权限，请先到 Vehicle Motion 授权');
+    // hasPermission 还没查完时是 null，这一步必须等它出结果：
+    // 直接发起会撞上原生的 ERR_NO_PERMISSION，界面冒出一句吓人的失败提示，
+    // 而且 autoStartedRef 被置位后本轮再也不会重试，等于「自动开启」悄悄坏了
+    if (hasPermission !== true) {
+      if (hasPermission === false) {
+        setLinkageHint('检测到乘车，但缺少悬浮窗权限，请先到 Vehicle Motion 授权');
+        autoStartedRef.current = true;
+      }
+      return;
+    }
+    if (!cuesSupported) {
+      setLinkageHint('当前构建不支持悬浮窗，无法自动开启圆点');
       autoStartedRef.current = true;
       return;
     }
@@ -246,7 +256,8 @@ export const CarDetectionScreen: React.FC<CarDetectionScreenProps> = ({ onExit }
 
       <View style={styles.footer}>
         <Text style={styles.footerText}>
-          💡 提示：乘车时保持手机平稳放置，系统将自动检测并提供震动反馈
+          💡 提示：乘车时保持手机平稳放置。检测只在本页打开期间进行，
+          离开或退出本页即停止；已经开启的圆点由后台服务继续负责
         </Text>
       </View>
     </SafeAreaView>

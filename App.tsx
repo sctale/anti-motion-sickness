@@ -100,7 +100,7 @@ function RootNavigator() {
         <FeatureCard
           icon="📳"
           title="乘车检测"
-          description="通过加速度计判断是否处于乘车状态，检测到乘车时自动震动反馈"
+          description="用加速度计判断是否处于乘车状态，检测期间自动震动反馈（仅本页打开时有效）"
           buttonLabel="启动乘车检测"
           onPress={() => setScreen('carDetection')}
         />
