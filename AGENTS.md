@@ -469,6 +469,18 @@ $env:GH_TOKEN = "ghp_xxx"
 - 检查 `OverlayPackage` 是否在 `MainApplication` 中注册
 - 真机可以用 `adb logcat` 抓 stacktrace（开发机调试用）
 
+### 改了 app.json 或 Config Plugin，产物里却没变
+
+这是本项目栽过两次的那类错误（v0.3.11 的启动页 logo、v0.3.16 的桌面名字）：
+配置写了、日志打了「已替换」，但 APK 里还是旧的，于是 CHANGELOG 把没生效的修复当成已完成发出去。
+
+- **Expo 56 的模板资源写在所有 Config Plugin 之后**：在插件里改 `android/app/src/main/res/values/strings.xml`
+  的 `app_name` 会被写回工程 slug（实测：插件确实执行并写入成功）。桌面显示名因此由
+  `release.ps1` 在 **prebuild 之后**按 `app.json` 的 `android.applicationName` 重写。
+- **正确做法是在产物上断言，而不是在配置上打日志**：
+  `release.ps1` 步骤 7 现在会拿 `aapt dump badging` 的 `application-label` 与期望值比对，
+  不一致直接中止发布并打印实际值。图标同理用 `aapt2 dump resources` 解出真实文件来看。
+
 ### 点图标就闪退（原生配置与 app.json 漂移）
 
 - 现象：APK 装得上、图标在、点开就没了，连一屏错误都看不到。

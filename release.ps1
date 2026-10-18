@@ -399,6 +399,27 @@ if (-not $SkipPrebuild -and -not $UploadOnly) {
         }
         Write-Success "prebuild 完成（--clean，原生配置与 app.json 一致）"
 
+        # 桌面显示名：Expo 56 的 prebuild 会在所有 Config Plugin **之后**用模板重写
+        # res/values/strings.xml，所以插件里改 app_name 会被覆盖（实测：插件写入成功、文件仍是工程 slug）。
+        # 真源仍然是 app.json 的 android.applicationName，这里只是在 prebuild 后补一刀。
+        $appName = (Get-Content $AppJson -Raw -Encoding UTF8 | ConvertFrom-Json).expo.android.applicationName
+        if ($appName) {
+            $stringsPath = Join-Path $ProjectRoot "android\app\src\main\res\values\strings.xml"
+            if (-not (Test-Path $stringsPath)) {
+                Write-Err "prebuild 后找不到 strings.xml，无法设置桌面显示名：$stringsPath"
+                exit 1
+            }
+            $stringsRaw = Get-Content $stringsPath -Raw -Encoding UTF8
+            $appNode = [regex]::Match($stringsRaw, '<string name="app_name">.*?</string>')
+            if (-not $appNode.Success) {
+                Write-Err "strings.xml 里没有 app_name 节点，拒绝静默跳过"
+                exit 1
+            }
+            $stringsNew = $stringsRaw.Replace($appNode.Value, "<string name=`"app_name`">$appName</string>")
+            Write-Utf8NoBom -Path $stringsPath -Content $stringsNew
+            Write-Success "桌面显示名写入 strings.xml：$appName"
+        }
+
         # 陈旧原生源码守卫：Config Plugin 会按清单清理上一次注入、本次已删除的 .kt。
         # 如果仍有「不在 native/android 里、也不是模板文件」的 .kt 残留，说明注入链有问题，
         # 继续构建只会在 Kotlin 编译期报 unresolved reference。
@@ -506,6 +527,20 @@ if ($Aapt -and (Test-Path $Aapt)) {
 } else {
     Write-Warn "未找到 aapt（SDK: $AndroidSdk），跳过版本号验证"
 }
+
+    # 桌面名字要在产物里核对：v0.3.16 曾「改了 app.json 却仍是工程 slug」，
+    # 说明 prebuild 之后还有一手，光看配置不够。
+    $wantLabel = (Get-Content $AppJson -Raw -Encoding UTF8 | ConvertFrom-Json).expo.android.applicationName
+    if ($wantLabel) {
+        $labelLine = ($badging.Output -join "`n")
+        if ($labelLine -match "application-label:'$([regex]::Escape($wantLabel))'") {
+            Write-Success "APK application-label = $wantLabel ✓"
+        } else {
+            $actual = [regex]::Match($labelLine, "application-label:'([^']*)'").Groups[1].Value
+            Write-Err "APK 桌面名字不对：期望「$wantLabel」，实际「$actual」（发布中止）"
+            exit 1
+        }
+    }
 
 # 16KB 页对齐校验：Android 15+ 的 16KB 设备装不上未对齐的 APK。
 # 之前 README/AGENTS 只是「声称已配置」，这里改成对产物做实测。
