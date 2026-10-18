@@ -284,15 +284,25 @@ if (-not $SkipChecks -and -not $UploadOnly -and -not $SkipBuild) {
 
     Push-Location $ProjectRoot
     try {
-        & npx tsc --noEmit
-        if ($LASTEXITCODE -ne 0) { throw "TypeScript 类型检查失败" }
+        # 两道检查都必须走 Invoke-NativeCommand：全局 ErrorActionPreference=Stop 下，
+        # npx / kotlinc 写到 stderr 的正常输出会被升级成终止性异常，
+        # 表现为「脚本刚打印第一行就死掉」（实测踩过，且失败点正是这道本该保命的门）。
+        $tsc = Invoke-NativeCommand -AllowFailure { & npx tsc --noEmit }
+        if ($tsc.ExitCode -ne 0) {
+            Write-Err "TypeScript 类型检查失败：`n$($tsc.Output)"
+            exit 1
+        }
         Write-Success "tsc --noEmit 通过"
 
         # 算法验证台（纯 Kotlin，改过 native/android 后必须通过）
         if (Get-Command bash -ErrorAction SilentlyContinue) {
-            & bash tools/verify/run.sh
-            if ($LASTEXITCODE -ne 0) { throw "算法验证台断言失败" }
-            Write-Success "tools/verify 全部断言通过"
+            $verify = Invoke-NativeCommand -AllowFailure { & bash tools/verify/run.sh }
+            if ($verify.ExitCode -ne 0) {
+                Write-Err "算法验证台断言失败：`n$($verify.Output)"
+                exit 1
+            }
+            $passed = ($verify.Output -split "`n" | Where-Object { $_ -match '断言通过' } | Select-Object -First 1)
+            Write-Success $(if ($passed) { "tools/verify：$($passed.Trim())" } else { "tools/verify 全部断言通过" })
         } else {
             Write-Warn "未找到 bash，跳过算法验证台"
         }
