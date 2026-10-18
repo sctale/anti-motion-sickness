@@ -1,6 +1,6 @@
 {
   "name": "anti-car-sickness-rn",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "license": "MIT",
   "main": "index.ts",
   "dependencies": {
@@ -8,6 +8,7 @@
     "expo-constants": "~56.0.4",
     "expo-haptics": "^56.0.3",
     "expo-sensors": "^56.0.5",
+    "expo-splash-screen": "~56.0.15",
     "expo-system-ui": "~56.0.5",
     "react": "19.2.3",
     "react-native": "0.85.3",

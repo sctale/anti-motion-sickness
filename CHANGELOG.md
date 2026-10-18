@@ -1,5 +1,38 @@
 # 更新日志 (Changelog)
 
+## [0.3.11] - 2026-10-18
+
+### 🐛 修复：启动页还是 Expo 模板的占位图
+
+把 v0.3.10 的 APK 拆开逐个资源看才发现：启动器图标确实是素描版
+（`mipmap/ic_launcher_foreground` 的 xxxhdpi 层抽出来就是小车 + 两列圆点），
+但 **`drawable/splashscreen_logo` 还是 Expo 模板自带的「安全区参考线」占位图** ——
+也就是说每次冷启动的过渡页上，用户看到的是一圈没意义的辅助线。
+
+原因：`expo install expo-splash-screen` 只把插件名加进 `app.json`，
+不带任何参数，于是插件用了它自己打包的默认图，而不是我们生成的 `assets/splash-icon.png`。
+
+- 显式配置 splash 插件：`image: ./assets/splash-icon.png`、`imageWidth: 340`、
+  背景 `#F2EFE6`（与素描纸面同色，明暗两套一致），`expo-splash-screen` 补为直接依赖。
+- 验证方式固化：从 APK 里按资源表抽出实际文件（`aapt2 dump resources` → 解出 webp → 转 PNG 查看），
+  而不是相信「图标已替换」这行日志 —— 这次的漏网之鱼正是这么发现的。
+
+### 🛠 构建链（同批）
+
+- `release.ps1` 里所有外部命令统一走 `Invoke-NativeCommand`：
+  `expo prebuild` / `gradlew` / `aapt` / `zipalign` 的正常进度都写 stderr，
+  在全局 `ErrorActionPreference=Stop` 下会被升级成终止性异常，表现为脚本静默中断、日志停在半行。
+- prebuild 前先停 Gradle 守护进程，并对 `EBUSY` 重试一次：
+  守护进程锁住 `android/app/build` 会让 `--clean` 删不掉目录，
+  且失败后 `android/` 只剩半截（连 gradlew 都没了），只能整目录重建。
+
+### 🧪 验证
+
+- `tsc --noEmit` 通过；算法验证台 14 场景 31 断言通过；
+  prebuild 注入守卫（`OverlayPackage` / `CrashCapture`）通过；APK 16KB 对齐通过。
+
+---
+
 ## [0.3.10] - 2026-10-18
 
 ### ✨ 新增：后台常驻引导（这个产品最常见的真实故障不是闪退，而是「圆点用着用着没了」）
