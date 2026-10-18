@@ -123,6 +123,12 @@ src/
 3. **不要使用世界坐标 Y 轴（磁北）作为前进方向** —— 车头朝向与磁北无关。
 4. 横向提示同时使用偏航角速度（瞬时、跟手）与横向加速度（转弯持续力），两者符号一致。
 5. 使用临界阻尼弹簧平滑，不使用一阶/二阶「提前 N ms 预测」。
+6. **线程约定**：`OverlayService` 的融合与引擎只在传感器 `HandlerThread` 上被读写；
+   主线程（`onStartCommand`、息屏广播、`applySettings`）一律 `sensorHandler.post` 投递，
+   跨线程引用（`cueEngine`、`overlayManager`）标 `@Volatile`。新增设置项若会影响引擎参数，
+   走「重建引擎 + post 替换」，不要在主线程就地改 `CueConfig`。
+7. 灵敏度只缩放「满行程参考输入」，**不要**用它放大 `maxOffsetXdp/maxOffsetYdp`
+   —— 位移上限必须与 `OverlayView` 的边缘带几何一致，否则又会被静默裁剪、两列不同步。
 
 ### 关键参数
 

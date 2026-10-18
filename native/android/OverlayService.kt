@@ -35,15 +35,24 @@ import androidx.core.content.ContextCompat
  *
  * 运行模型（避免常驻服务发热）：
  * - 传感器回调跑在独立的 [HandlerThread]，不占用主线程；
- * - 多路传感器（旋转矢量 / 陀螺仪 / 线性加速度）各自到事件只做「存最新值」，
- *   真正的融合+绘图刷新按 [TARGET_UI_HZ] 合并执行一次，不做每事件全量重算；
- * - 所有中间数组复用，传感器链路上不再 per-event 分配对象。
+ * - 多路传感器（旋转矢量 / 陀螺仪 / 线性加速度）各自的事件只做「存最新值」，
+ *   真正的融合 + 绘图刷新按 [TARGET_UI_HZ] 合并执行一次，不做每事件全量重算；
+ * - 原始值缓冲复用，去掉了每帧的 `copyOf()` 分配
+ *   （融合层内部仍有少量小数组分配，60Hz 下可忽略，不再为了零分配把接口改成可变复用对象）。
+ *
+ * 线程约定：**只有传感器线程**读写 [fusion]、[cueEngine] 的运行时状态与 `sensorsRegistered`；
+ * 主线程（onStartCommand / 息屏广播）通过 `sensorHandler.post` 投递注册、注销与设置重载，
+ * 不直接改这些对象。跨线程读取的引用（引擎、悬浮窗管理器）标 `@Volatile`。
  */
 class OverlayService : Service(), SensorEventListener {
 
     private lateinit var sensorManager: SensorManager
     private val fusion = SensorFusion()
+
+    @Volatile
     private var cueEngine = MotionCueEngine()
+
+    @Volatile
     private var overlayManager: OverlayManager? = null
 
     private var sensorThread: HandlerThread? = null
@@ -99,13 +108,15 @@ class OverlayService : Service(), SensorEventListener {
         startForegroundSafely()
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        resolveSensors()
-        applySettings()
-        overlayManager = OverlayManager(this)
 
+        // 传感器线程要先建好：applySettings / registerSensors 都是往它投递任务
         val thread = HandlerThread("OverlaySensor").also { it.start() }
         sensorThread = thread
         sensorHandler = Handler(thread.looper)
+
+        resolveSensors()
+        applySettings()
+        overlayManager = OverlayManager(this)
 
         registerSensors()
         ContextCompat.registerReceiver(
@@ -250,6 +261,7 @@ class OverlayService : Service(), SensorEventListener {
             gravity = if (hasGravity) gravityValues else null,
             gyro = if (hasGyro) gyroValues else null
         )
+        // @Volatile 引用只读一次，保证一帧内用的是同一个引擎实例
         val cue = cueEngine.update(fused, now)
         overlayManager?.update(cue.offsetXdp, cue.offsetYdp, cue.alpha, cue.magnitude01)
     }
@@ -280,15 +292,25 @@ class OverlayService : Service(), SensorEventListener {
         System.arraycopy(source, 0, target, 0, n)
     }
 
-    /** 读取（并应用）用户设置：自动模式开关 + 灵敏度档位 */
+    /**
+     * 读取并应用用户设置（自动模式 + 灵敏度）。
+     * 引擎整体替换，所以替换动作投递到传感器线程：
+     * 传感器线程可能正在跑 update()，在主线程直接换引用会读到半新半旧的一帧。
+     */
     private fun applySettings() {
         val settings = SettingsStore.get(this)
         val engine = MotionCueEngine(
             MotionCueEngine.CueConfig().withSensitivity(settings.sensitivity)
         )
         engine.autoMode = settings.autoMode
-        engine.reset()
-        cueEngine = engine
+
+        val handler = sensorHandler
+        if (handler == null) {
+            // onCreate 早期还没有线程，此时不存在并发读者
+            cueEngine = engine
+            return
+        }
+        handler.post { cueEngine = engine }
     }
 
     private fun resolveSensors() {
@@ -303,28 +325,44 @@ class OverlayService : Service(), SensorEventListener {
     }
 
     private fun registerSensors() {
-        if (sensorsRegistered) return
         val handler = sensorHandler ?: return
-        sensorsRegistered = true
-        listOfNotNull(
-            rotationVectorSensor,
-            gyroSensor,
-            linearAccelSensor,
-            accelSensor,
-            gravitySensor
-        ).forEach {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME, handler)
+        // 注册状态只在传感器线程读写，避免息屏广播（主线程）与回调线程竞态
+        handler.post {
+            if (sensorsRegistered) return@post
+            sensorsRegistered = true
+            listOfNotNull(
+                rotationVectorSensor,
+                gyroSensor,
+                linearAccelSensor,
+                accelSensor,
+                gravitySensor
+            ).forEach {
+                sensorManager.registerListener(
+                    this, it, SensorManager.SENSOR_DELAY_GAME, handler
+                )
+            }
         }
     }
 
     private fun unregisterSensors() {
-        if (!sensorsRegistered) return
-        sensorsRegistered = false
-        sensorHandler?.removeCallbacks(pipelineRunnable)
-        pipelineScheduled = false
-        sensorManager.unregisterListener(this)
-        fusion.reset()
-        cueEngine.reset()
+        val handler = sensorHandler
+        if (handler == null) {
+            // 线程已退出（onDestroy 尾部）：就地注销，确保不会再有回调
+            if (sensorsRegistered) {
+                sensorsRegistered = false
+                sensorManager.unregisterListener(this)
+            }
+            return
+        }
+        handler.post {
+            if (!sensorsRegistered) return@post
+            sensorsRegistered = false
+            handler.removeCallbacks(pipelineRunnable)
+            pipelineScheduled = false
+            sensorManager.unregisterListener(this)
+            fusion.reset()
+            cueEngine.reset()
+        }
     }
 
     /** 记录本次启动失败原因，供 OverlayModule 精确报错；reason=null 表示用户主动停止 */

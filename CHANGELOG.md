@@ -1,5 +1,32 @@
 # 更新日志 (Changelog)
 
+## [0.3.7] - 2026-10-18
+
+第四轮：对前三轮自己写的改动做一轮双轴复查，修掉复查中发现的真实竞态。
+
+### 🐛 修复
+
+- **主线程与传感器线程竞态**：`applySettings()` 在主线程整体替换 `cueEngine`，
+  而传感器线程可能正在 `update()` 里读它；息屏广播也在主线程调
+  `unregisterSensors()` → 内部 `fusion.reset()` / `cueEngine.reset()` 与回调线程的读写重叠。
+  现在明确线程约定：**只有传感器线程**碰 `fusion` / `cueEngine` 运行时状态与
+  `sensorsRegistered`，主线程一律通过 `sensorHandler.post` 投递注册、注销与引擎替换；
+  跨线程读取的引用（`cueEngine`、`overlayManager`）标 `@Volatile`，
+  `runPipeline()` 只读一次引用，保证一帧内用的是同一个引擎实例。
+  `onCreate` 相应调整为「先建线程，再应用设置与注册」。
+- `onDestroy` 路径：`unregisterSensors()` 在线程已退出时就地注销，
+  未退出时借助 `quitSafely()` 让排队的注销任务跑完再退出。
+- 类文档里的过度声明订正：上一版写「所有中间数组复用，传感器链路上不再 per-event 分配」，
+  实际只去掉了每帧 `copyOf()`，融合层仍有少量小数组分配（60Hz 下可忽略）。
+  保留少量分配是有意的——不为了零分配把 `FusionOutput` 改成可变复用对象而牺牲可读性。
+
+### 🧪 验证
+
+- `tsc --noEmit` 通过；`tools/verify/run.sh` 14 场景 31 断言通过；
+  `:app:compileReleaseKotlin` 实际重跑并通过（非 UP-TO-DATE）；16KB 对齐校验通过。
+
+---
+
 ## [0.3.6] - 2026-10-18
 
 ### 🐛 修复
