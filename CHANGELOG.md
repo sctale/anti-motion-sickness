@@ -28,6 +28,37 @@ Windows PowerShell 5.1 对无 BOM 的 UTF-8 默认按 ANSI/GBK 解码，
 
 ---
 
+## [0.3.17] - 2026-10-18
+
+### 🐛 修复：桌面名字还是工程 slug —— 撤回上一轮那条没生效的修复
+
+0.3.16 写了「补上 `android.applicationName`，并用 `aapt dump badging` 验证」，
+但拆开 v0.3.16 的 APK 实测，`application-label` **仍然是 `anti-car-sickness-rn`**，
+那条修复根本没生效，CHANGELOG 却已经把它当成已完成发出去了。这次是同一类错误的第二次
+（v0.3.11 的「图标已替换」也是这样）：**改完配置不等于产物里改了**。
+
+定位过程：先试在 Config Plugin 里改 `strings.xml`，插件确实执行并写入了
+「防晕车助手」，prebuild 结束后文件又被改回 slug ——
+Expo 56 的模板资源写在所有 Config Plugin **之后**，插件层动不了它。
+所以正确落点是 **prebuild 之后**：`release.ps1` 在 prebuild 完成后按 `app.json` 的
+`android.applicationName` 重写 `res/values/strings.xml` 里的 `app_name`（真源仍是 app.json），
+找不到节点就报错而不是静默跳过。
+
+同时在步骤 7 加了产物断言：`aapt dump badging` 的 `application-label` 必须等于期望值，
+不一致就**中止发布**并打印实际值。名字这类东西以后不再靠「应该生效了」。
+
+顺带把 0.3.16 那次误报在文档里的表述改回可验证的形式：
+`AGENTS.md` 增加一条排查项 —— 「改了 app.json / Config Plugin，产物里没变」时的正确做法。
+
+### 🧪 验证
+
+- `tsc --noEmit` 通过；验证台 18 组 65 断言通过；
+  Config Plugin 语法检查通过（`node --check`），`release.ps1` 解析检查通过（PS 5.1 Parser）。
+- **待产物核对**：本轮的标签是否真的进入 APK，由发布脚本的 `application-label` 断言把关，
+  该断言失败会直接中止发布，所以只要 v0.3.17 出来了就是通过的状态。
+
+---
+
 ## [0.3.16] - 2026-10-18
 
 ### 🐛 修复：`onCreate` / `onStartCommand` 里还有一段没兜住的初始化（红线 8 的残留缺口）
