@@ -462,12 +462,32 @@ if (-not $UploadOnly) {
     if (Test-Path $replaceIcons) {
         $icons = Invoke-NativeCommand -AllowFailure { & powershell -ExecutionPolicy Bypass -File $replaceIcons }
         if ($icons.ExitCode -ne 0) {
-            Write-Warn "图标替换失败，继续构建：$($icons.Output)"
-        } else {
-            Write-Success "图标已替换"
+            # 以前这里只告警继续构建，等于可能发出一个带 Expo 默认图标的包而无人察觉
+            # （v0.3.11 的启动页占位图就是这么漏出去的）。图标是产品门面，失败必须停。
+            Write-Err "图标替换失败，发布中止：$($icons.Output)"
+            exit 1
         }
+        Write-Success "图标已替换"
     } else {
-        Write-Warn "未找到 replace_icons.ps1，跳过"
+        Write-Err "未找到 replace_icons.ps1，无法确认图标已更新，发布中止"
+        exit 1
+    }
+
+    # 通知 / 磁贴矢量图标要在产物目录里核对：它由 Config Plugin 从
+    # native/res/drawable 复制过来，插件没跑或复用了旧目录时内容会是旧的。
+    $iconSrc = Join-Path $ProjectRoot "native\res\drawable\ic_stat_motion.xml"
+    $iconDst = Join-Path $ProjectRoot "android\app\src\main\res\drawable\ic_stat_motion.xml"
+    if ((Test-Path $iconSrc) -and (Test-Path $iconDst)) {
+        $srcHash = (Get-FileHash $iconSrc -Algorithm SHA256).Hash
+        $dstHash = (Get-FileHash $iconDst -Algorithm SHA256).Hash
+        if ($srcHash -ne $dstHash) {
+            Write-Err "通知/磁贴图标与生成物不一致（插件未生效或残留旧文件），发布中止"
+            exit 1
+        }
+        Write-Success "通知/磁贴图标与 native/res/drawable 生成物一致 ✓"
+    } elseif (Test-Path $iconSrc) {
+        Write-Err "android 工程里缺少 ic_stat_motion.xml（Config Plugin 未注入），发布中止"
+        exit 1
     }
 } else {
     Write-Step "5/8 跳过图标替换"
