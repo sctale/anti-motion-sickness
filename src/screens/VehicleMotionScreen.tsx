@@ -89,9 +89,9 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
 
         {!isSupported && (
           <View style={styles.warningCard}>
-            <Text style={styles.warningTitle}>⚠️ 原生模块未接入</Text>
+            <Text style={styles.warningTitle}>⚠️ 当前平台不支持</Text>
             <Text style={styles.warningText}>
-              当前构建不包含原生悬浮窗模块（OverlayModule），悬浮圆点无法显示。请使用包含原生层的 Android 构建。
+              悬浮圆点依赖 Android 的悬浮窗与前台服务，iOS 没有对应能力；若你已在 Android 上，说明该构建未包含原生模块 OverlayModule，请使用完整 Android 构建。
             </Text>
           </View>
         )}
