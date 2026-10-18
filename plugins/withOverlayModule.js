@@ -131,7 +131,9 @@ function withOverlayKotlinSources(config) {
         JSON.stringify(files, null, 2) + '\n'
       );
 
-      // 通知小图标
+      // 通知小图标：真源是 tools/icons/render.mjs 生成的 native/res/drawable/ic_stat_motion.xml
+      // （与桌面图标共用同一批素描生成器）。找不到生成物时退回旧的通用符号并大声告警，
+      // 而不是静默发一个「桌面是素描、通知栏是模板符号」的分裂产物。
       const drawableDir = path.join(
         projectRoot,
         'android',
@@ -142,10 +144,36 @@ function withOverlayKotlinSources(config) {
         'drawable'
       );
       await fs.promises.mkdir(drawableDir, { recursive: true });
+
+      const generatedIcon = path.join(
+        projectRoot,
+        'native',
+        'res',
+        'drawable',
+        'ic_stat_motion.xml'
+      );
+      let iconXml = NOTIFICATION_ICON_XML;
+      let iconSource = '内置回退（通用符号）';
+      if (fs.existsSync(generatedIcon)) {
+        const content = await fs.promises.readFile(generatedIcon, 'utf8');
+        if (content.includes('<vector') && content.includes('android:pathData')) {
+          iconXml = content;
+          iconSource = 'native/res/drawable/ic_stat_motion.xml（素描版）';
+        } else {
+          console.warn(
+            `[withOverlayModule] ${generatedIcon} 不像合法的 VectorDrawable，退回内置图标`
+          );
+        }
+      } else {
+        console.warn(
+          `[withOverlayModule] 未找到生成的通知图标（先跑 node tools/icons/render.mjs），退回内置通用符号`
+        );
+      }
       await fs.promises.writeFile(
         path.join(drawableDir, 'ic_stat_motion.xml'),
-        NOTIFICATION_ICON_XML
+        iconXml
       );
+      console.log(`[withOverlayModule] 通知/磁贴图标来源：${iconSource}`);
 
       return cfg;
     },

@@ -348,6 +348,147 @@ function buildSvg(kind) {
   return svg(sketch({ scale: kind === 'splash' ? 1.05 : 1.1 }));
 }
 
+// ===== 通知栏 / 磁贴小图标（Android VectorDrawable）=====
+//
+// 为什么单独生成：`android:width=24dp` 的通知小图标会被系统按单色蒙版着色，
+// 桌面图标与启动页换成素描版之后，通知栏和 Quick Settings 磁贴里仍是模板自带的那个
+// 通用符号 —— 同一个产品出现两套视觉语言，用户会以为是两个不同的 App。
+// 这里复用同一批素描生成器（roughPolyline / roughCircle / 固定种子），
+// 所以通知图标和桌面图标是「同一只手画的」，而不是照着描的。
+//
+// 坐标仍用 1024 视口（1dp ≈ 42.7 单位），这样线宽/半径可以直接换算成 dp。
+
+const MONO_VIEW = 24;
+const MONO_SCALE = 1.24;
+const MONO_DY = -10;
+const MONO_STROKE = 44; // ≈1.03dp：24dp 图标上再粗就会把车身糊成一坨
+const MONO_STROKE_THIN = 34; // ≈0.8dp，车窗
+const MONO_DOT_R = 50; // ≈1.17dp 实心点
+const MONO_DOT_X = 384;
+const MONO_DOT_YS = [-236, 0, 236];
+
+function monoPt([x, y]) {
+  return [CENTER + x * MONO_SCALE, CENTER + y * MONO_SCALE + MONO_DY];
+}
+
+function filledCirclePath(cx, cy, r) {
+  return `M ${(cx - r).toFixed(1)} ${cy.toFixed(1)} a ${r.toFixed(1)} ${r.toFixed(1)} 0 1 0 ${(r * 2).toFixed(1)} 0 a ${r.toFixed(1)} ${r.toFixed(1)} 0 1 0 ${(-r * 2).toFixed(1)} 0 Z`;
+}
+
+/** 通知图标里出现的 pathData，全部过一遍与桌面图标相同的合法性守卫 */
+function guarded(d) {
+  if (/L\s+L|MM|L\s+M/.test(d)) {
+    throw new Error('通知图标 pathData 出现非法命令序列');
+  }
+  if (/NaN|Infinity/.test(d)) throw new Error('通知图标 pathData 出现非法坐标');
+  return d;
+}
+
+function notificationIconPaths() {
+  const paths = [];
+
+  paths.push({
+    kind: 'stroke',
+    width: MONO_STROKE,
+    d: guarded(roughPolyline(CAR_BODY.map(monoPt), { stream: 11, amp: 2.6, closed: true })),
+  });
+  paths.push({
+    kind: 'stroke',
+    width: MONO_STROKE_THIN,
+    d: guarded(roughPolyline(CAR_WINDOW.map(monoPt), { stream: 17, amp: 1.8, closed: true })),
+  });
+  // 车轮在 24dp 上画不成「圈」——描边一糊就变成两个白饼。
+  // 改成实心小圆点：读起来仍是「车落在两个轮子上」，且与两侧提示点在语言上统一。
+  for (const w of WHEELS) {
+    paths.push({
+      kind: 'fill',
+      d: guarded(
+        filledCirclePath(
+          w.x * MONO_SCALE + CENTER,
+          w.y * MONO_SCALE + CENTER + MONO_DY,
+          w.r * MONO_SCALE * 0.62
+        )
+      )
+    });
+  }
+  for (const [i, dy] of MONO_DOT_YS.entries()) {
+    for (const side of [-1, 1]) {
+      paths.push({
+        kind: 'fill',
+        d: guarded(filledCirclePath(CENTER + side * MONO_DOT_X, CENTER + dy + MONO_DY, MONO_DOT_R)),
+        _i: i,
+        _side: side,
+      });
+    }
+  }
+  return paths;
+}
+
+function notificationIconXml() {
+  const body = notificationIconPaths()
+    .map((p) =>
+      p.kind === 'stroke'
+        ? `    <path
+        android:pathData="${p.d}"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="${p.width}"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />`
+        : `    <path
+        android:pathData="${p.d}"
+        android:fillColor="#FFFFFFFF" />`
+    )
+    .join('\n');
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 tools/icons/render.mjs 生成，勿手改；与桌面图标共用同一批素描生成器 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="${MONO_VIEW}dp"
+    android:height="${MONO_VIEW}dp"
+    android:viewportWidth="${SIZE}"
+    android:viewportHeight="${SIZE}"
+    android:tint="#FFFFFFFF">
+${body}
+</vector>
+`;
+}
+
+/**
+ * 通知图标预览：按系统着色后的样子（白线条 + 深色通知栏底）。
+ * 三个尺寸分别是 4x / 2x / 1x —— 1x 就是通知栏里的真实大小，
+ * 只有对着这一格才能判断「线会不会糊成一团」，光看放大图会自欺欺人。
+ */
+function notificationPreviewSvg() {
+  const parts = notificationIconPaths().map((p) =>
+    p.kind === 'stroke'
+      ? `<path d="${p.d}" fill="none" stroke="#FFFFFF" stroke-width="${p.width}" stroke-linecap="round" stroke-linejoin="round"/>`
+      : `<path d="${p.d}" fill="#FFFFFF"/>`
+  );
+  const panels = [
+    { px: 96, label: '96px' },
+    { px: 72, label: '72px（xxhdpi 的 24dp）' },
+    { px: 48, label: '48px' },
+    { px: 24, label: '24px（mdpi 真实大小）' },
+  ];
+  let x = 40;
+  const groups = panels
+    .map((p) => {
+      const s = p.px / SIZE;
+      const cx = x + p.px / 2;
+      const g = `<g transform="translate(${cx} 120) scale(${s}) translate(${-CENTER} ${-CENTER})">${parts.join('')}</g>
+  <rect x="${x}" y="${120 - p.px / 2}" width="${p.px}" height="${p.px}" fill="none" stroke="#4B5563" stroke-width="1"/>
+  <text x="${cx}" y="212" fill="#9AA0A6" font-size="13" text-anchor="middle" font-family="sans-serif">${p.label}</text>`;
+      x += p.px + 96;
+      return g;
+    })
+    .join('\n');
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${x + 20}" height="260" viewBox="0 0 ${x + 20} 260">
+  <rect width="${x + 20}" height="260" fill="#1F2023"/>
+${groups}
+</svg>`;
+}
+
 // ===== 布局自检：主体不许越出自适应图标安全区 =====
 function assertSafeZone() {
   const offenders = [];
@@ -463,11 +604,21 @@ async function render() {
   for (const [file, body] of [
     ['preview.png', previewSvg()],
     ['sizes.png', sizeSheetSvg()],
+    ['notification-preview.png', notificationPreviewSvg()],
   ]) {
     await sharp(Buffer.from(body), { density: 96 })
       .png({ compressionLevel: 9 })
       .toFile(path.join(ROOT, 'tools/icons', file));
   }
+
+  // 通知栏 / 磁贴矢量图标：源码入库，由 Config Plugin 原样复制进 android 工程
+  const nativeResDir = path.join(ROOT, 'native', 'res', 'drawable');
+  fs.mkdirSync(nativeResDir, { recursive: true });
+  const iconXml = notificationIconXml();
+  fs.writeFileSync(path.join(nativeResDir, 'ic_stat_motion.xml'), iconXml);
+  console.log(
+    `✓ native/res/drawable/ic_stat_motion.xml  (${(Buffer.byteLength(iconXml) / 1024).toFixed(1)} KB, ${notificationIconPaths().length} 条 path)`
+  );
   console.log('✓ tools/icons/preview.png（遮罩预览）、tools/icons/sizes.png（尺寸预览）');
   console.log(`· 安全区自检通过：主体均在半径 ${SAFE_RADIUS}px 内`);
 }
