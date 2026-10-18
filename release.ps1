@@ -81,6 +81,40 @@ function Write-Err {
     Write-Host "[ERR] $Message" -ForegroundColor Red
 }
 
+<#
+  安全执行外部命令。
+
+  PowerShell 5.1 在 $ErrorActionPreference='Stop' 下把 `cmd 2>&1` 捕获到的 stderr
+  当成错误记录，并升级为**终止性异常** —— git push / tag 的正常进度输出全走 stderr，
+  于是「命令其实成功了、脚本却当场中止」，v0.3.3 就是在 push 那一行停掉、
+  后面的 tag 与 Release 上传没跑。这里临时把首选项降为 Continue，
+  统一用 $LASTEXITCODE 判断成败。
+#>
+function Invoke-NativeCommand {
+    param(
+        [Parameter(Mandatory)][scriptblock]$Command,
+        [switch]$AllowFailure
+    )
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $output = $null
+    $exit = $null
+    try {
+        $output = & $Command 2>&1
+        $exit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+
+    $text = ($output | Out-String).Trim()
+    if ($exit -ne 0 -and -not $AllowFailure) {
+        throw "命令失败 (exit $exit): $($Command.ToString())`n$text"
+    }
+
+    return [pscustomobject]@{ ExitCode = $exit; Output = $text }
+}
+
 function Get-RepoOwner {
     $remoteUrl = git -C $ProjectRoot config --get remote.origin.url
     if ($remoteUrl -match "github\.com[:/](.+?)/(.+?)(?:\.git)?$") {
@@ -210,10 +244,10 @@ if ($BumpType -ne "none") {
 # ============== 步骤 3: Git 提交版本号变更 ==============
 if ($BumpType -ne "none") {
     Write-Step "3/8 提交版本号变更"
-    git -C $ProjectRoot add app.json package.json CHANGELOG.md 2>&1 | Out-Null
-    $commitOutput = git -C $ProjectRoot commit -m "chore(release): 升级到 v$newVersion" 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warn "commit 失败或无变更: $commitOutput"
+    Invoke-NativeCommand { git -C $ProjectRoot add app.json package.json CHANGELOG.md } | Out-Null
+    $commit = Invoke-NativeCommand -AllowFailure { git -C $ProjectRoot commit -m "chore(release): 升级到 v$newVersion" }
+    if ($commit.ExitCode -ne 0) {
+        Write-Warn "commit 失败或无变更: $($commit.Output)"
     } else {
         Write-Success "已提交"
     }
@@ -367,18 +401,37 @@ Write-Step "8/8 推送到 GitHub Release"
 $repo = Get-RepoOwner
 $repoSlug = "$($repo.Owner)/$($repo.Repo)"
 
-# 推送 git 变更
-git -C $ProjectRoot push origin main 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Warn "git push 失败或无更新"
+# 推送 git 变更（git 的进度输出走 stderr，必须用 Invoke-NativeCommand，
+# 否则「push 实际成功但脚本当场中止」，tag 与 Release 就不会执行）
+$push = Invoke-NativeCommand -AllowFailure { git -C $ProjectRoot push origin main }
+if ($push.ExitCode -ne 0) {
+    Write-Warn "git push 失败或无更新：$($push.Output)"
 } else {
     Write-Success "git push 完成"
 }
 
-# 创建/获取 tag
+if (-not (Test-Path $Gh)) {
+    Write-Err "未找到 gh CLI: $Gh，无法创建 Release。请先安装或登录：`n  `"$Gh`" auth login"
+    exit 1
+}
+
+# 创建 / 推送 tag
 $tagName = "v$newVersion"
-git -C $ProjectRoot tag -a $tagName -m $tagName 2>&1 | Out-Null
-git -C $ProjectRoot push origin $tagName 2>&1 | Out-Null
+$apkAsset = "$ApkDest#anti-motion-sickness-$tagName.apk"
+
+$existingTag = Invoke-NativeCommand -AllowFailure { git -C $ProjectRoot rev-parse -q --verify "refs/tags/$tagName" }
+if ($existingTag.ExitCode -eq 0 -and $existingTag.Output) {
+    Write-Warn "本地已存在 tag $tagName，跳过创建（需要覆盖请手动 git tag -f + push -f）"
+} else {
+    Invoke-NativeCommand { git -C $ProjectRoot tag -a $tagName -m $tagName } | Out-Null
+    Write-Success "tag $tagName 已创建"
+}
+
+$pushTag = Invoke-NativeCommand -AllowFailure { git -C $ProjectRoot push origin $tagName }
+if ($pushTag.ExitCode -ne 0) {
+    Write-Err "tag 推送失败：$($pushTag.Output)"
+    exit 1
+}
 Write-Success "tag $tagName 已推送"
 
 # release notes
@@ -392,43 +445,40 @@ if (-not (Test-Path $NotesFile)) {
     }
 }
 
-$uploadArgs = @(
-    "release", "upload", $tagName,
-    "`"$ApkDest`"#anti-motion-sickness-$tagName.apk",
-    "--repo", $repoSlug,
-    "--clobber"
-)
-& $Gh @uploadArgs 2>&1 | ForEach-Object { Write-Host $_ }
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Warn "APK 上传失败，尝试创建 release..."
-
+# 先保证 Release 存在，再上传资产：原来的「upload 失败就 create」会把 create 的
+# 输出当成上传结果，出问题时看不出到底是哪一步失败。
+$releaseView = Invoke-NativeCommand -AllowFailure { & $Gh release view $tagName --repo $repoSlug }
+if ($releaseView.ExitCode -ne 0) {
     $createArgs = @(
         "release", "create", $tagName,
-        "`"$ApkDest`"#anti-motion-sickness-$tagName.apk",
         "--repo", $repoSlug,
-        "--title", $tagName
+        "--title", $tagName,
+        "--notes", "v$newVersion（详见 CHANGELOG.md）"
     )
+    if (Test-Path $NotesFile) {
+        $createArgs = @("release", "create", $tagName, "--repo", $repoSlug, "--title", $tagName, "--notes-file", $NotesFile)
+    }
     if ($Draft) {
         $createArgs += "--draft"
     }
-    if (Test-Path $NotesFile) {
-        $createArgs += "--notes-file", "`"$NotesFile`""
-    } else {
-        $createArgs += "--notes", "v$newVersion 发布"
+    $create = Invoke-NativeCommand -AllowFailure { & $Gh @createArgs }
+    if ($create.ExitCode -ne 0) {
+        Write-Err "创建 Release 失败：$($create.Output)"
+        exit 1
     }
-
-    & $Gh @createArgs 2>&1 | ForEach-Object { Write-Host $_ }
+    Write-Success "Release $tagName 已创建"
+} else {
+    Write-Success "Release $tagName 已存在，上传覆盖 APK"
 }
 
-if ($LASTEXITCODE -eq 0) {
-    Write-Success "Release 完成！"
-    Write-Host ""
-    Write-Host "下载链接: https://github.com/$repoSlug/releases/tag/$tagName" -ForegroundColor Green
-} else {
-    Write-Err "Release 上传失败"
+$upload = Invoke-NativeCommand -AllowFailure { & $Gh release upload $tagName $apkAsset --repo $repoSlug --clobber }
+if ($upload.ExitCode -ne 0) {
+    Write-Err "APK 上传失败：$($upload.Output)"
     exit 1
 }
+Write-Success "APK 已上传"
 
+Write-Host ""
+Write-Host "下载链接: https://github.com/$repoSlug/releases/tag/$tagName" -ForegroundColor Green
 Write-Host ""
 Write-Success "全部完成 ✓"
