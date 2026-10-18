@@ -514,6 +514,16 @@ if (Test-Path $legacyApk) {
     Write-Warn "旧版无版本号产物仍存在：$((Split-Path $legacyApk -Leaf))（可自行删除，现在一律输出带版本号的包名）"
 }
 
+# aapt 把中文标签按 UTF-8 写到 stdout，而 PowerShell 5.1 默认按本机代码页解码，
+# 解出来的字符串与 app.json 里的 UTF-8 值永远对不上（实测断言把正确的「防晕车助手」
+# 判成了乱码并中止发布）。所以比对前先让控制台按 UTF-8 解码子进程输出。
+$__prevOutputEncoding = [Console]::OutputEncoding
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+} catch {
+    Write-Warn "设置控制台 UTF-8 编码失败，标签校验结果可能不可靠"
+}
+
 if ($Aapt -and (Test-Path $Aapt)) {
     $badging = Invoke-NativeCommand -AllowFailure { & $Aapt dump badging $ApkDest }
     $aaptOutput = $badging.Output -split "`n" | Select-String "package:"
@@ -558,6 +568,8 @@ if ($Zipalign -and (Test-Path $Zipalign)) {
 } else {
     Write-Warn "未找到 zipalign，跳过 16KB 对齐校验（build-tools 需 ≥ 34）"
 }
+
+if ($__prevOutputEncoding) { [Console]::OutputEncoding = $__prevOutputEncoding }
 
 # ============== 步骤 8: 推送到 GitHub Release ==============
 Write-Step "8/8 推送到 GitHub Release"
