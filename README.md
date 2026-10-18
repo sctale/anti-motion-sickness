@@ -83,7 +83,7 @@ TYPE_APPLICATION_OVERLAY 窗口
 bash tools/verify/run.sh
 ```
 
-覆盖 11 个场景：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式淡入淡出、重力回退路径、极端输入限幅。
+覆盖 12 个场景：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式淡入淡出、重力回退路径、极端输入限幅、倾斜姿态下纯重力不泄漏。
 
 ## 🤖 Android 16 适配要点
 
@@ -119,26 +119,18 @@ bash tools/verify/run.sh
 
 ### 开发者：构建 + 发布
 
-> **默认本地构建**（Windows + Android SDK），`release.ps1` 一键完成；本地无构建环境时可用**手动触发的 GitHub Actions 工作流**出包。
+> **全部本地构建**（Windows + Android SDK），`release.ps1` 一键完成；本项目不使用 GitHub Actions。
 
 ```powershell
-# 本地一键发布（升级 patch 版本号 + prebuild + 构建 + 上传 GitHub Release）
+# 本地一键发布（前置检查 + 升级 patch 版本号 + prebuild + 构建 + 上传 GitHub Release）
 .\release.ps1
 
 # 升级次版本号
 .\release.ps1 -BumpType minor
+
+# 跳过前置检查（tsc + 算法验证台）—— 不建议
+.\release.ps1 -SkipChecks
 ```
-
-```bash
-# GitHub Actions 出包（方式1：手动触发，版本号取自 app.json）
-gh workflow run android-release.yml
-
-# GitHub Actions 出包（方式2：推送标签触发，版本号取自标签）
-git push origin v0.3.0
-```
-
-> 工作流使用 debug 签名（与本地 release 构建一致），仅用于真机测试安装，不可上架应用商店。
-> 若该版本 Release 已带 APK（例如已用 `release.ps1` 本地发布），工作流会自动跳过，避免两套 debug 签名互相覆盖。
 
 完整发布流程详见 [AGENTS.md](./AGENTS.md)。
 

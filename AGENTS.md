@@ -141,7 +141,7 @@ src/
 bash tools/verify/run.sh
 ```
 
-覆盖 11 个场景：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式、重力回退、极端限幅。
+覆盖 12 个场景：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式、重力回退、极端限幅、倾斜姿态下纯重力不泄漏。
 修改 `SensorFusion.kt` / `MotionCueEngine.kt` / `RotationMath.kt` 后必须全部断言通过。
 
 ### AndroidManifest 关键配置
@@ -180,20 +180,24 @@ bash tools/verify/run.sh
 
 ### 📌 构建策略
 
-**默认本地构建（Windows + Android SDK）；GitHub Actions 仅保留「手动触发」的 APK 构建工作流。**
+**全部本地构建（Windows + Android SDK），不使用 GitHub Actions。**
 
 | 项目 | 策略 |
 |------|------|
-| 首选构建环境 | 开发者本地 Windows + Android SDK |
+| 构建环境 | 开发者本地 Windows + Android SDK |
 | 本地构建 | `npx expo prebuild` + `gradlew assembleRelease`（`release.ps1` 一键完成） |
-| GitHub 构建 | [`.github/workflows/android-release.yml`](./.github/workflows/android-release.yml)：**手动触发**（`workflow_dispatch`）或**推送 `v*` 标签**触发；普通 push 不触发；若该版本 Release 已带 APK 则自动跳过（避免本地/CI 两套 debug 签名互相覆盖） |
-| 发布方式 | `gh release upload` / 工作流内自动 `gh release create` |
+| 发布方式 | `gh release upload` / `gh release create` |
 | 测试方式 | 用户下载 APK 真机测试 |
+| CI/CD | **不使用** GitHub Actions（节省配额与 storage；`.github/` 已在 .gitignore 中屏蔽） |
+| 前置检查 | `release.ps1` 构建前自动跑 `tsc --noEmit` 与 `tools/verify/run.sh`，失败即中止 |
 
-何时用 GitHub 构建：本地没有 Android SDK / Gradle 环境（如纯云端开发）时，用 Actions 出包。
-**注意**：工作流使用 debug 签名（与本地一致，仅够真机测试安装，不可上架应用商店）；签名密钥不落库。
+理由：本项目是 Android 原生 + RN 混合，构建依赖本机 Android SDK + Gradle；发布频率低，
+`release.ps1` 已经覆盖「版本号 → prebuild → 图标 → 构建 → 校验 → tag → 上传」全链路。
 
-**真机测试策略**：构建 APK（本地或 Actions）→ 上传 GitHub Release → 用户手机真机测试。
+> v0.3.0 曾加入手动触发的 `android-release.yml`，v0.3.3 按「产物只走本地构建」约定移除；
+> 若需要云端出包，先确认再重新引入，不要直接恢复旧文件。
+
+**真机测试策略**：本地构建 APK → 上传 GitHub Release → 用户手机真机测试。
 
 ### 1. 一键发布到 GitHub
 
@@ -243,7 +247,7 @@ bash tools/verify/run.sh
 5. 点击"启动 Vehicle Motion"
 6. **首次启动**：授予"显示在其他应用上层"权限
 7. 返回 App → 点击"▶ 启动"
-8. **观察**：圆点出现在屏幕上下边缘
+8. **观察**：圆点出现在屏幕**左右两侧**（各 8 个）
 9. **摇晃手机**：圆点随运动方向移动
 10. **切换到微信/浏览器**：圆点仍然显示，覆盖在其他 App 上
 11. 测试完毕后通过 GitHub Issue 反馈问题
@@ -447,12 +451,7 @@ cd android; .\gradlew assembleRelease
 # ===== 算法验证（无需真机，改算法后必跑）=====
 bash tools/verify/run.sh
 
-# ===== GitHub Actions 出包（本地无 Android SDK 时）=====
-gh workflow run android-release.yml          # 方式1：手动触发（版本号取自 app.json）
-git push origin v0.3.0                       # 方式2：推送标签触发（版本号取自标签）
-gh run watch                                 # 观察进度
-gh run view --log-failed                     # 失败时看日志
-gh release download v0.3.0                   # 下载 APK
+# ===== GitHub Actions 出包：本项目不使用，全部走 .\release.ps1 =====
 
 # ===== Git 常用 =====
 git add <files>
@@ -497,7 +496,6 @@ src/                       # 所有 RN 代码
 native/android/            # 原生 Kotlin 源码（8 个文件，必须入库）⭐
 plugins/                   # Config Plugin（prebuild 注入原生层）⭐
 tools/verify/              # 算法验证台（JVM 运行，无需真机）
-.github/workflows/         # 手动触发的 APK 构建工作流（唯一允许的 CI 文件）
 assets/                    # 图标资源（源文件由 tools/icons/render.mjs 生成）
 release.ps1                # 一键发布脚本
 replace_icons.ps1          # 图标替换（PNG → android mipmap）
@@ -509,6 +507,7 @@ LICENSE                    # MIT
 ```
 node_modules/              # npm 包
 /android/                  # Expo prebuild 产物（根锚定，勿写成 android/，否则会误吞 native/android）
+.github/                   # 不使用 GitHub Actions
 .gradle-cache/             # Gradle 缓存
 .expo/                     # Expo 缓存
 dist/, web-build/          # 构建输出
