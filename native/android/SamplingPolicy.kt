@@ -30,10 +30,16 @@ enum class SamplingLevel {
  * 静止时圆点本来就不动，没必要维持最高采样率。
  *
  * 规则（可完全在 JVM 上验证）：
- * - 任一帧运动强度达到 [motionThreshold] → 立刻回到 [SamplingLevel.HIGH] 并刷新静止计时；
+ * - 任一帧运动强度达到 [motionThreshold]，或圆点当前正在显示（[cueVisible]）
+ *   → 立刻回到 [SamplingLevel.HIGH] 并刷新静止计时；
  * - 静止累计超过 [idleToMediumMs] → 降到 [SamplingLevel.MEDIUM]；
  * - 静止累计超过 [idleToLowMs] → 降到 [SamplingLevel.LOW]；
- * - 降级只按时间、升级只看运动强度，两者条件互斥，因此不会来回抖动。
+ * - 降级只按时间、升级只看运动与显示状态，两者条件互斥，因此不会来回抖动。
+ *
+ * `cueVisible` 这条不能省：自动模式有淡出窗口（停车后还要显示一会儿），
+ * 匀速巡航时强度也可能长期低于门限，此时若降到 200ms 采样，
+ * 下一次转弯要慢半拍才跟上 —— 提示的跟手性比省那一点电重要。
+ * 因此真正能省电的场景是「静止、停车后忘关、走路时带在身上」这些确实在等着的阶段。
  *
  * 线程约定：与 `OverlayService` 的融合/引擎一样，只在传感器线程上调用 [update]。
  */
@@ -62,14 +68,14 @@ class SamplingPolicy(
      * @param nowMs 单调时钟（elapsedRealtime），必须单调不减
      * @param magnitude01 本帧运动强度（0~1），来自 `MotionCueEngine`
      */
-    fun update(nowMs: Long, magnitude01: Float): SamplingLevel {
+    fun update(nowMs: Long, magnitude01: Float, cueVisible: Boolean = false): SamplingLevel {
         if (!initialized) {
             // 冷启动先按「刚有运动」处理：否则 t=0 就会因为「静止了 120s」被误降级
             initialized = true
             lastMotionAtMs = nowMs
         }
 
-        if (magnitude01 >= motionThreshold) {
+        if (magnitude01 >= motionThreshold || cueVisible) {
             lastMotionAtMs = nowMs
             level = SamplingLevel.HIGH
             return level

@@ -31,7 +31,8 @@ class MotionCueEngine(
          * 横向满行程位移（dp）。
          *
          * 必须 ≤ OverlayView 在边缘带内能显示的横向行程
-         * `OverlayView.MAX_SHIFT_X_DP = EDGE_INSET_DP − DOT_RADIUS_DP × RADIUS_MAX_SCALE ≈ 20.4`。
+         * `OverlayGeometry.MAX_SHIFT_X_DP = EDGE_INSET_DP − DOT_RADIUS_DP × RADIUS_MAX_SCALE ≈ 20.375`，
+         * 这条不变量由验证台断言「引擎横向满行程 ≤ 几何可走行程」守住。
          * 之前这里是 40dp 而 View 只给到 ±21.5/±30dp，结果左右两列在不同位置撞墙、
          * 不再像「整组平移」，而且引擎算出的后半段位移被静默裁掉。
          */

@@ -50,6 +50,8 @@ fun main() {
     scenarioAutoHysteresis(upright)
     scenarioSamplingPolicy()
     scenarioSamplingPolicyNoFlapping()
+    scenarioSamplingKeepsAliveWhileVisible()
+    scenarioOverlayGeometry()
 
     println()
     if (failures == 0) {
@@ -440,6 +442,108 @@ private fun scenarioSamplingPolicyNoFlapping() {
         switches <= 2 * (totalFrames / burstEveryFrames) + 1)
     check("确实会因长时间静止降档（不是永远最高档）", downgraded)
     check("起步后回到 HIGH", previous == SamplingLevel.HIGH)
+}
+
+/** 圆点正在显示时不得降档（自动模式的淡出窗口、巡航弱信号都属此情形） */
+private fun scenarioSamplingKeepsAliveWhileVisible() {
+    println("    场景：圆点显示中不降档（跟手性优先于省电）")
+    val p = SamplingPolicy()
+    val idle = p.motionThreshold - 0.03f
+
+    p.update(0L, idle)
+    check("强度低于门限且圆点未显示时按时间降档",
+        p.update(p.idleToLowMs, idle, cueVisible = false) == SamplingLevel.LOW)
+    check("圆点仍在显示时不降档",
+        p.update(p.idleToLowMs + 60_000L, idle, cueVisible = true) == SamplingLevel.HIGH)
+    check("显示中的一次刷新会重置静止计时",
+        p.update(p.idleToLowMs + 61_000L, idle, cueVisible = false) == SamplingLevel.HIGH)
+}
+
+/**
+ * 悬浮窗排布的几何不变量。
+ *
+ * 这些量以前同时写在 OverlayView 和 MotionCueEngine 两处，靠注释提醒同步，
+ * 真的出过「左列 +30/-21.5、右列 +21.5/-30」的不对称裁剪。
+ */
+private fun scenarioOverlayGeometry() {
+    println("    场景：边缘带几何与引擎满行程的一致性")
+    val density = 3f
+    val widthPx = 360f * density
+    val heightPx = 800f * density
+    val edgeInsetPx = OverlayGeometry.EDGE_INSET_DP * density
+    val bandMaxPx = OverlayGeometry.BAND_MAX_DP * density
+    val out = DotLayout()
+
+    // 跨模块不变量：引擎走满行程时，View 必须真的能走那么远（否则被静默裁掉）
+    check(
+        "引擎横向满行程 ≤ 几何可走行程",
+        CFG.maxOffsetXdp <= OverlayGeometry.MAX_SHIFT_X_DP + 1e-4f
+    )
+    check("几何可走行程由公式给出（≈20.375dp）",
+        kotlin.math.abs(OverlayGeometry.MAX_SHIFT_X_DP - 20.375f) < 0.01f)
+
+    // 满强度 + 满行程：这是最容易出界的组合
+    val ok = OverlayGeometry.compute(
+        widthPx, heightPx, density, 1f, CFG.maxOffsetXdp, CFG.maxOffsetYdp, out
+    )
+    check("常规手机尺寸排布可用", ok)
+    val maxRadius = OverlayGeometry.DOT_RADIUS_DP * OverlayGeometry.RADIUS_MAX_SCALE * density
+    check("满强度时的钳位行程与 MAX_SHIFT_X_DP 一致",
+        kotlin.math.abs(OverlayGeometry.maxShiftX(maxRadius, edgeInsetPx, bandMaxPx) -
+            OverlayGeometry.MAX_SHIFT_X_DP * density) < 0.01f)
+    check("右行到极限仍未侵入内容区", out.leftX + out.radius <= bandMaxPx + 0.01f)
+    check("左行到极限仍不出屏",
+        OverlayGeometry.compute(widthPx, heightPx, density, 1f, -CFG.maxOffsetXdp, 0f, out) &&
+            out.leftX - out.radius >= -0.01f)
+    check("右行到极限右列仍不出屏",
+        OverlayGeometry.compute(widthPx, heightPx, density, 1f, CFG.maxOffsetXdp, 0f, out) &&
+            out.rightX + out.radius <= widthPx + 0.01f)
+
+    // 平移一致性：两列间距恒等于 width − 2×edgeInset，与位移无关
+    val gapBase = widthPx - 2f * edgeInsetPx
+    var gapStable = true
+    for (offsetDp in floatArrayOf(-40f, -CFG.maxOffsetXdp, 0f, CFG.maxOffsetXdp, 40f)) {
+        OverlayGeometry.compute(widthPx, heightPx, density, 0.5f, offsetDp, 0f, out)
+        if (kotlin.math.abs((out.rightX - out.leftX) - gapBase) > 0.01f) gapStable = false
+        if (kotlin.math.abs(out.leftX - (edgeInsetPx + out.shiftX)) > 0.01f) gapStable = false
+    }
+    check("两列共用同一个位移量（间距不随位移变化）", gapStable)
+
+    // 超行程输入必须被钳位，而不是穿出边缘带
+    OverlayGeometry.compute(widthPx, heightPx, density, 1f, 400f, 0f, out)
+    check("远超行程的输入被钳在几何上限",
+        kotlin.math.abs(out.shiftX - OverlayGeometry.MAX_SHIFT_X_DP * density) < 0.01f)
+
+    // 纵向：整组平移，最下个点在向下极限处仍贴边不出屏
+    OverlayGeometry.compute(widthPx, heightPx, density, 1f, 0f, CFG.maxOffsetYdp, out)
+    val lowestY = OverlayGeometry.dotY(OverlayGeometry.DOT_COUNT_PER_SIDE - 1, out)
+    check("向下走满仍不出下边缘", lowestY + out.radius <= heightPx + 0.01f)
+    OverlayGeometry.compute(widthPx, heightPx, density, 1f, 0f, -CFG.maxOffsetYdp, out)
+    check("向上走满最上面的点仍在上边内",
+        OverlayGeometry.dotY(0, out) - out.radius >= -0.01f)
+
+    // 半径只作为强度的第二通道：单调、且在标定倍率内
+    val r0 = OverlayGeometry.radiusFor(0f, maxRadius / OverlayGeometry.RADIUS_MAX_SCALE)
+    val rMid = OverlayGeometry.radiusFor(0.5f, maxRadius / OverlayGeometry.RADIUS_MAX_SCALE)
+    val r1 = OverlayGeometry.radiusFor(1f, maxRadius / OverlayGeometry.RADIUS_MAX_SCALE)
+    check("半径随强度单调增加", r0 < rMid && rMid < r1)
+    check("强度 0 / 满对应标定的倍率",
+        kotlin.math.abs(r0 / (maxRadius / OverlayGeometry.RADIUS_MAX_SCALE) -
+            OverlayGeometry.RADIUS_MIN_SCALE) < 0.01f &&
+            kotlin.math.abs(r1 / (maxRadius / OverlayGeometry.RADIUS_MAX_SCALE) -
+                OverlayGeometry.RADIUS_MAX_SCALE) < 0.01f)
+
+    // 退化输入不能画到屏幕外
+    check("窗口尚未量出尺寸时不排布",
+        !OverlayGeometry.compute(0f, heightPx, density, 1f, 10f, 10f, DotLayout()))
+    check("分屏窄到放不下边缘带时不排布（而不是画到中间）",
+        !OverlayGeometry.compute(2f * edgeInsetPx, heightPx, density, 1f, 10f, 10f, DotLayout()))
+    val narrow = DotLayout()
+    OverlayGeometry.compute(edgeInsetPx * 2.2f, heightPx, density, 1f, 20f, 0f, narrow)
+    check("窄窗口下仍按同一行程钳位（不因宽度变化而越界）",
+        narrow.shiftX <= OverlayGeometry.MAX_SHIFT_X_DP * density + 0.01f)
+    check("边缘带不够时行程被压到 0 而不是变负",
+        OverlayGeometry.maxShiftX(edgeInsetPx + 1f, edgeInsetPx, bandMaxPx) == 0f)
 }
 
 private fun report(out: MotionCueEngine.CueOutput) {

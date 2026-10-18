@@ -307,8 +307,10 @@ class OverlayService : Service(), SensorEventListener {
             overlayManager?.update(cue.offsetXdp, cue.offsetYdp, cue.alpha, cue.magnitude01)
             pipelineFailures = 0
 
-            // 常驻服务的耗电主要来采样本身：静止就降档，一动立刻回到最高档
-            val desiredLevel = samplingPolicy.update(now, cue.magnitude01)
+            // 常驻服务的耗电主要来采样本身：静止就降档，一动立刻回到最高档。
+            // 圆点还在显示时不降档 —— 自动模式有淡出窗口、巡航强度可能低于门限，
+            // 这时降到 200ms 会让下一次转弯慢半拍，跟手性优先。
+            val desiredLevel = samplingPolicy.update(now, cue.magnitude01, cue.alpha > 0.01f)
             if (desiredLevel != requestedSamplingLevel) requestSamplingLevel(desiredLevel)
         } catch (e: Exception) {
             pipelineFailures++

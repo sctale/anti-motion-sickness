@@ -5,8 +5,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.view.View
-import kotlin.math.max
-import kotlin.math.min
 
 /**
  * 悬浮窗自定义 View：屏幕左右两侧各绘制一列圆点（共 16 个），
@@ -22,6 +20,10 @@ import kotlin.math.min
  * 结果左列能走 +30/-21.5dp、右列能走 +21.5/-30dp，
  * 大位移时两列撞墙位置不同，看起来不再是「整组平移」。
  * 引擎侧的满行程（[MotionCueEngine.CueConfig.maxOffsetXdp]）必须不超过这里的行程。
+ *
+ * 本 View 只负责画：几何量（半径、行程、列位置）全部在 [OverlayGeometry] 里定义，
+ * 那些「两列必须对称」「引擎满行程 ≤ 可走行程」的不变量由 `tools/verify` 断言守住，
+ * 不再靠注释提醒。
  */
 class OverlayView(context: Context) : View(context) {
 
@@ -36,12 +38,9 @@ class OverlayView(context: Context) : View(context) {
         strokeWidth = dp(1f)
     }
 
-    private val dotRadiusPx = dp(DOT_RADIUS_DP)
-    private val edgeInsetPx = dp(EDGE_INSET_DP)
-    private val bandMaxPx = dp(BAND_MAX_DP)
-
-    private var offsetX = 0f
-    private var offsetY = 0f
+    /** 引擎输出的位移（dp）与强度；换算成像素统一交给 OverlayGeometry */
+    private var offsetXdp = 0f
+    private var offsetYdp = 0f
     private var viewAlpha = 0f
     private var magnitude = 0f
     private var paused = false
@@ -55,8 +54,8 @@ class OverlayView(context: Context) : View(context) {
 
     /** 由 OverlayManager 调用；位移单位 dp，alpha 与 magnitude01 范围 0~1 */
     fun setCue(offsetXdp: Float, offsetYdp: Float, alpha: Float, magnitude01: Float) {
-        offsetX = dp(offsetXdp)
-        offsetY = dp(offsetYdp)
+        this.offsetXdp = offsetXdp
+        this.offsetYdp = offsetYdp
         viewAlpha = alpha.coerceIn(0f, 1f)
         magnitude = magnitude01.coerceIn(0f, 1f)
         if (!paused) postInvalidateOnAnimation()
@@ -66,43 +65,26 @@ class OverlayView(context: Context) : View(context) {
         super.onDraw(canvas)
         if (paused || viewAlpha <= 0.01f) return
 
-        val widthF = width.toFloat()
-        val heightF = height.toFloat()
-        if (widthF <= 0f || heightF <= 0f) return
+        if (!OverlayGeometry.compute(width.toFloat(), height.toFloat(), density, magnitude, offsetXdp, offsetYdp, layout)) {
+            return
+        }
 
         val alphaInt = (255 * viewAlpha).toInt().coerceIn(0, 255)
         fillPaint.alpha = alphaInt
         strokePaint.alpha = alphaInt
 
-        // 运动越强圆点略大，增强提示但保持克制
-        val radius = dotRadiusPx *
-            (RADIUS_MIN_SCALE + (RADIUS_MAX_SCALE - RADIUS_MIN_SCALE) * magnitude)
-
-        val topY = heightF * SPAN_START
-        val bottomY = heightF * SPAN_END
-        if (bottomY <= topY) return
-        val spacing = (bottomY - topY) / (DOT_COUNT_PER_SIDE - 1)
-
-        // 横向：离边缘太近会出屏，太远会侵入内容区，取两边剩余量的较小值
-        val maxShiftX = max(0f, min(edgeInsetPx - radius, bandMaxPx - edgeInsetPx))
-        // 纵向：整组一起走，靠上下留白限幅；不做逐点裁剪，
-        // 否则分屏/小窗时边缘的点会被「按住」，中间还在动，破坏平移一致性
-        val maxShiftY = max(0f, min(topY - radius, heightF - bottomY - radius))
-
-        val shiftX = offsetX.coerceIn(-maxShiftX, maxShiftX)
-        val shiftY = offsetY.coerceIn(-maxShiftY, maxShiftY)
-
-        val leftX = edgeInsetPx + shiftX
-        val rightX = widthF - edgeInsetPx + shiftX
-
-        for (i in 0 until DOT_COUNT_PER_SIDE) {
-            val y = topY + i * spacing + shiftY
-            canvas.drawCircle(leftX, y, radius, fillPaint)
-            canvas.drawCircle(leftX, y, radius, strokePaint)
-            canvas.drawCircle(rightX, y, radius, fillPaint)
-            canvas.drawCircle(rightX, y, radius, strokePaint)
+        val radius = layout.radius
+        for (i in 0 until OverlayGeometry.DOT_COUNT_PER_SIDE) {
+            val y = OverlayGeometry.dotY(i, layout)
+            canvas.drawCircle(layout.leftX, y, radius, fillPaint)
+            canvas.drawCircle(layout.leftX, y, radius, strokePaint)
+            canvas.drawCircle(layout.rightX, y, radius, fillPaint)
+            canvas.drawCircle(layout.rightX, y, radius, strokePaint)
         }
     }
+
+    /** 每帧复用的排布结果，避免 60Hz 下持续分配 */
+    private val layout = DotLayout()
 
     private val density: Float
         get() = resources.displayMetrics.density
@@ -110,33 +92,9 @@ class OverlayView(context: Context) : View(context) {
     private fun dp(value: Float): Float = value * density
 
     companion object {
-        /** 每侧圆点数量（左右各 8，共 16） */
-        const val DOT_COUNT_PER_SIDE = 8
-
-        /** 圆点基准半径（dp） */
-        const val DOT_RADIUS_DP = 4.5f
-
-        /** 静止位置距屏幕边缘的距离（dp） */
-        const val EDGE_INSET_DP = 26f
-
-        /** 圆点允许停留的最大边缘带宽度（dp），保证不侵入内容区 */
-        const val BAND_MAX_DP = 56f
-
-        /** 强度为 0 / 满时的半径倍率 */
-        const val RADIUS_MIN_SCALE = 0.9f
-        const val RADIUS_MAX_SCALE = 1.25f
-
-        /** 圆点纵向分布范围（屏幕高度比例） */
-        const val SPAN_START = 0.15f
-        const val SPAN_END = 0.85f
-
+        /** 兼容旧引用：几何常量与行程现在只在 `OverlayGeometry` 里定义一次 */
+        const val DOT_COUNT_PER_SIDE = OverlayGeometry.DOT_COUNT_PER_SIDE
         const val STROKE_COLOR = "#66000000"
-
-        /**
-         * 当前几何下横向实际可走的行程（dp）：
-         * min(EDGE_INSET − 最大半径, BAND_MAX − EDGE_INSET) = min(26−5.625, 30) ≈ 20.4
-         * 调整边缘带时，记得同步 [MotionCueEngine.CueConfig] 的 maxOffsetXdp。
-         */
-        const val MAX_SHIFT_X_DP = EDGE_INSET_DP - DOT_RADIUS_DP * RADIUS_MAX_SCALE
+        val MAX_SHIFT_X_DP: Float = OverlayGeometry.MAX_SHIFT_X_DP
     }
 }
