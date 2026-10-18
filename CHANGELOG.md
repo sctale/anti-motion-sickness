@@ -1,5 +1,39 @@
 # 更新日志 (Changelog)
 
+## [0.3.12] - 2026-10-18
+
+### 🐛 修复：常驻服务本身还有一条「闪退」路径（我上一轮重写时引入的回归）
+
+上一轮把 `OverlayService` 重写为「传感器线程 + 合并到 60Hz 的管线」时，
+顺手丢掉了 v0.2.x 里包住运动处理的那层 `try/catch`。
+后果是：`SensorManager` 回调里任何一帧抛出未捕获异常，直接崩掉整个进程 ——
+现象和用户报的「点开就闪退」一模一样，只不过这次是在悬浮窗跑起来之后才崩。
+同类问题还有 `startForeground`：Android 12+ 的后台启动限制、通知被禁用时它会抛
+`ForegroundServiceStartNotAllowedException`，而这个调用位于 `onCreate` / `onStartCommand`，
+抛出即崩溃，连一条原因都留不下。
+
+- `startForegroundSafely()` 改为返回布尔并逐段 `try/catch`：构造通知失败、带类型调用失败、
+  退回无类型调用仍失败，三种情况都只记日志并返回 `false`；
+  调用方据此 `markStopped(REASON_FGS_DENIED)` + `stopSelf()` 体面收场，不再让异常逃出服务生命周期回调。
+- 每帧计算包进 `try/catch`：单帧失败只记一条 warn 并继续（**不像旧版那样无声吞掉**），
+  连续失败到 `MAX_PIPELINE_FAILURES = 30` 才停止传感器、记录 `REASON_PIPELINE_FAILED` 并 `stopSelf()`。
+  成功一帧即清零计数，避免偶发噪声累积成误停。
+- `OverlayModule` 补上兜底分支：任何已记录的失败原因都如实 `reject("ERR_START_<reason>")`，
+  并给出可读文案（前台服务被拒 → 提示去系统设置允许后台运行；计算连续失败 → 提示反馈机型）。
+  此前这些原因会被下面的轮询超时分支吞成「启动超时」，把真实原因盖掉，
+  用户和开发者都会被误导到省电策略之外去找病根。
+
+### 🧪 验证
+
+- `tsc --noEmit` 通过；算法验证台 14 场景 31 断言通过；
+  `expo prebuild --clean` 后原生代码 `compileReleaseKotlin` 通过；
+  prebuild 注入守卫（`OverlayPackage` / `CrashCapture`）通过；APK 16KB 对齐通过。
+- 仍未验证：真机上的启动与长跑。本环境无可用设备（模拟器会话以管理员身份运行，
+  6 种 GPU/权限组合均无法启动），所以这轮修的是「代码里能证明会崩」的路径；
+  若设备端仍有闪退，重开 App 后首页会直接印出上次崩溃的堆栈。
+
+---
+
 ## [0.3.11] - 2026-10-18
 
 ### 🐛 修复：启动页还是 Expo 模板的占位图
