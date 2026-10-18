@@ -48,6 +48,8 @@ fun main() {
     scenarioTiltedGravityOnly()
     scenarioTurnDynamicRange(upright)
     scenarioAutoHysteresis(upright)
+    scenarioSamplingPolicy()
+    scenarioSamplingPolicyNoFlapping()
 
     println()
     if (failures == 0) {
@@ -362,6 +364,82 @@ private fun deviceFromWorld(rv: FloatArray, world: FloatArray): FloatArray {
         r[2], r[5], r[8]
     )
     return RotationMath.rotate(rt, world)
+}
+
+/**
+ * 采样档位策略：常驻服务的耗电主要来自采样本身，静止必须降档、一动立刻回档。
+ * 这些断言全部按 SamplingPolicy 的默认门限折算，改参数不会假失败。
+ */
+private fun scenarioSamplingPolicy() {
+    println("    场景：静止降档 / 运动回档（采样强度策略）")
+    val p = SamplingPolicy()
+    val idle = p.motionThreshold - 0.03f
+    val moving = p.motionThreshold + 0.10f
+
+    // 冷启动第一帧就判档：没有「刚有运动」的计时基准会立刻误降到最省电档
+    check("冷启动静止仍保持最高档", p.update(0L, idle) == SamplingLevel.HIGH)
+    check("静止未到中级门限仍保持最高档",
+        p.update(p.idleToMediumMs - 1L, idle) == SamplingLevel.HIGH)
+    check("静止过中级门限降到 MEDIUM",
+        p.update(p.idleToMediumMs, idle) == SamplingLevel.MEDIUM)
+    check("继续静止降到 LOW", p.update(p.idleToLowMs, idle) == SamplingLevel.LOW)
+    check("长时间静止维持 LOW 不再继续降",
+        p.update(p.idleToLowMs * 10L, idle) == SamplingLevel.LOW)
+
+    // 回到运动：立刻回最高档，且重新计时（不是「还要再静止 20s 才升」）
+    check("出现运动立刻回到 HIGH", p.update(p.idleToLowMs * 10L + 1L, moving) == SamplingLevel.HIGH)
+    check("回档后短暂静止不被降档",
+        p.update(p.idleToLowMs * 10L + 1_000L, idle) == SamplingLevel.HIGH)
+    check("刚好等于门限的运动强度算有运动",
+        p.update(p.idleToLowMs * 10L + 2_000L, p.motionThreshold) == SamplingLevel.HIGH)
+
+    // reset（息屏后重新注册）：恢复最高档并重新计时
+    p.update(p.idleToLowMs * 20L, idle)
+    p.reset()
+    check("reset 后档位回到 HIGH", p.level == SamplingLevel.HIGH)
+    check("reset 后静止重新计时",
+        p.update(500_000L, idle) == SamplingLevel.HIGH)
+
+    // 门限非法必须在构造时就失败，而不是运行时静默错位
+    var rejected = false
+    try {
+        SamplingPolicy(idleToMediumMs = 120_000L, idleToLowMs = 20_000L)
+    } catch (_: IllegalArgumentException) {
+        rejected = true
+    }
+    check("门限倒置被构造时拒绝", rejected)
+}
+
+/** 抖动：一个「走走停停」的行车过程不能导致反复注销/重注册传感器 */
+private fun scenarioSamplingPolicyNoFlapping() {
+    println("    场景：档位切换不抖动（每次切换都要重新注册传感器）")
+    val p = SamplingPolicy()
+    val idle = p.motionThreshold - 0.03f
+    val moving = p.motionThreshold + 0.10f
+
+    val frameMs = 250L
+    val burstEveryFrames = 120L // 每 30s 动一下，模拟等红灯后起步
+    val totalFrames = 960       // 共 4 分钟
+
+    var switches = 0
+    var downgraded = false
+    var previous = p.update(0L, moving)
+    for (step in 1..totalFrames) {
+        val isBurst = step % burstEveryFrames == 0L
+        val next = p.update(step * frameMs, if (isBurst) moving else idle)
+        if (next != previous) {
+            switches++
+            previous = next
+        }
+        if (next != SamplingLevel.HIGH) downgraded = true
+    }
+
+    // 每个「静止 30s + 动一下」最多产生 2 次切换（降一档 + 回最高档）。
+    // 如果实现改成「每帧都可能换」，这里会变成上千次，等于把传感器反复注销重注册。
+    check("4 分钟内切换次数有界（≤ 2 × 起步次数 + 1）",
+        switches <= 2 * (totalFrames / burstEveryFrames) + 1)
+    check("确实会因长时间静止降档（不是永远最高档）", downgraded)
+    check("起步后回到 HIGH", previous == SamplingLevel.HIGH)
 }
 
 private fun report(out: MotionCueEngine.CueOutput) {

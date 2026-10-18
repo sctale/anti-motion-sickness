@@ -81,6 +81,14 @@ class OverlayService : Service(), SensorEventListener {
 
     private var sensorsRegistered = false
 
+    /**
+     * 采样档位策略只在传感器线程上使用；`requestedSamplingLevel` 是「已经投递出去的目标」，
+     * `appliedSamplingLevel` 是「系统里真正生效的」，分开记录才能在投递失败时重试。
+     */
+    private val samplingPolicy = SamplingPolicy()
+    private var requestedSamplingLevel = SamplingLevel.HIGH
+    private var appliedSamplingLevel: SamplingLevel? = null
+
     /** 合并刷新：true 表示已排队一次延迟计算 */
     private var pipelineScheduled = false
     private var lastPipelineAtMs = 0L
@@ -298,6 +306,10 @@ class OverlayService : Service(), SensorEventListener {
             val cue = cueEngine.update(fused, now)
             overlayManager?.update(cue.offsetXdp, cue.offsetYdp, cue.alpha, cue.magnitude01)
             pipelineFailures = 0
+
+            // 常驻服务的耗电主要来采样本身：静止就降档，一动立刻回到最高档
+            val desiredLevel = samplingPolicy.update(now, cue.magnitude01)
+            if (desiredLevel != requestedSamplingLevel) requestSamplingLevel(desiredLevel)
         } catch (e: Exception) {
             pipelineFailures++
             if (pipelineFailures >= MAX_PIPELINE_FAILURES) {
@@ -369,22 +381,76 @@ class OverlayService : Service(), SensorEventListener {
         }
     }
 
+    private fun activeSensors(): List<Sensor> = listOfNotNull(
+        rotationVectorSensor,
+        gyroSensor,
+        linearAccelSensor,
+        accelSensor,
+        gravitySensor
+    )
+
+    /** SensorManager 没有「修改采样率」的公开 API，改档位只能注销后按新周期重新注册 */
+    private fun samplingRateFor(level: SamplingLevel): Int = when (level) {
+        SamplingLevel.HIGH -> SensorManager.SENSOR_DELAY_GAME
+        SamplingLevel.MEDIUM -> SensorManager.SENSOR_DELAY_UI
+        SamplingLevel.LOW -> SensorManager.SENSOR_DELAY_NORMAL
+    }
+
     private fun registerSensors() {
         val handler = sensorHandler ?: return
         // 注册状态只在传感器线程读写，避免息屏广播（主线程）与回调线程竞态
         handler.post {
             if (sensorsRegistered) return@post
             sensorsRegistered = true
-            listOfNotNull(
-                rotationVectorSensor,
-                gyroSensor,
-                linearAccelSensor,
-                accelSensor,
-                gravitySensor
-            ).forEach {
-                sensorManager.registerListener(
-                    this, it, SensorManager.SENSOR_DELAY_GAME, handler
-                )
+            appliedSamplingLevel = requestedSamplingLevel
+            val rate = samplingRateFor(requestedSamplingLevel)
+            activeSensors().forEach {
+                sensorManager.registerListener(this, it, rate, handler)
+            }
+        }
+    }
+
+    /**
+     * 投递一次采样档位切换。从 `onSensorChanged` 里同步调用（runPipeline 可能被就地执行），
+     * 因此必须 post 到下一轮循环再动 SensorManager，避免在回调里注销自己。
+     */
+    private fun requestSamplingLevel(level: SamplingLevel) {
+        if (level == requestedSamplingLevel) return
+        requestedSamplingLevel = level
+        val handler = sensorHandler ?: return
+        handler.post {
+            if (!sensorsRegistered) {
+                // 还没注册（息屏期间）：等 registerSensors 用新档位注册即可
+                appliedSamplingLevel = null
+                return@post
+            }
+            val rate = samplingRateFor(level)
+            try {
+                sensorManager.unregisterListener(this)
+                activeSensors().forEach {
+                    sensorManager.registerListener(this, it, rate, handler)
+                }
+                appliedSamplingLevel = level
+            } catch (e: Exception) {
+                // 换档半途失败最坏会让传感器全掉，那就整体重来一次并回到最高档，
+                // 宁可多耗电也不能让圆点悄悄冻住
+                Log.w(TAG, "切换采样档位失败，重建传感器注册", e)
+                appliedSamplingLevel = null
+                try {
+                    sensorManager.unregisterListener(this)
+                    requestedSamplingLevel = SamplingLevel.HIGH
+                    activeSensors().forEach {
+                        sensorManager.registerListener(
+                            this, it, samplingRateFor(SamplingLevel.HIGH), handler
+                        )
+                    }
+                    appliedSamplingLevel = SamplingLevel.HIGH
+                } catch (e2: Exception) {
+                    Log.e(TAG, "重建传感器注册仍然失败，停止传感器与悬浮窗", e2)
+                    markStopped(REASON_PIPELINE_FAILED)
+                    sensorsRegistered = false
+                    stopSelf()
+                }
             }
         }
     }
@@ -407,6 +473,10 @@ class OverlayService : Service(), SensorEventListener {
             sensorManager.unregisterListener(this)
             fusion.reset()
             cueEngine.reset()
+            // 重新亮屏后按最高档重新开始计时，避免「息屏前静止了很久」直接落到省电档
+            samplingPolicy.reset()
+            appliedSamplingLevel = null
+            requestedSamplingLevel = SamplingLevel.HIGH
         }
     }
 

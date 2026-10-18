@@ -57,6 +57,7 @@ echo "使用 kotlinc: $KOTLINC"
   "$ROOT/native/android/RotationMath.kt" \
   "$ROOT/native/android/SensorFusion.kt" \
   "$ROOT/native/android/MotionCueEngine.kt" \
+  "$ROOT/native/android/SamplingPolicy.kt" \
   "$ROOT/tools/verify/VerifyMain.kt" \
   -include-runtime -d "$OUT/verify.jar"
 
