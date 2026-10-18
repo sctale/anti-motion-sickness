@@ -226,18 +226,19 @@ bash tools/verify/run.sh
 ```
 
 **release.ps1 自动执行的流程**：
-1. 检查 git 状态
-2. 升级 `app.json` / `package.json` 版本号（默认 patch）
-3. 在 `CHANGELOG.md` 添加新版本占位条目
-4. 提交版本号变更并 push
+1. 检查环境（git 工作区是否干净）
+2. 升级 `app.json` / `package.json` 版本号，按 `major*10000+minor*100+patch` 重算 `versionCode`
+3. 在 `CHANGELOG.md` 添加新版本占位条目，提交版本号变更
+4. **前置检查**：`tsc --noEmit` + `bash tools/verify/run.sh`，任一失败即中止（`-SkipChecks` 可跳过）
 5. 执行 `npx expo prebuild --platform android --no-install`
-6. 执行 `replace_icons.ps1` 替换图标
-7. 执行 `gradlew assembleRelease` 构建 APK
-8. 用 `aapt dump badging` 验证 APK 版本号
-9. 复制 APK 到根目录 `anti-car-sickness-rn.apk`
-10. 创建/更新 git tag
-11. 用 `gh release upload` 上传 APK 到 GitHub Release
-12. 输出 Release 下载链接
+6. 校验原生注入结果：`android/` 里不应有 `native/android` 之外的残留 `.kt`
+7. 执行 `replace_icons.ps1` 替换图标
+8. 执行 `gradlew assembleRelease` 构建 APK
+9. 用 `aapt dump badging` 验证 APK 版本号
+10. **16KB 页对齐校验**：`zipalign -c -P 16 -v 4`，未对齐即中止（Android 15+ 16KB 设备装不上）
+11. 复制 APK 到根目录 `anti-motion-sickness-v<版本>.apk`（带版本号，便于区分当前包）
+12. push main → 建/推 tag → 确保 Release 存在并按 CHANGELOG 小节更新正文 → 上传 APK
+13. 输出 Release 下载链接
 
 ### 2. 真机测试步骤（用户）
 
@@ -310,11 +311,13 @@ cd android
 
 ```powershell
 $env:APK = "android\app\build\outputs\apk\release\app-release.apk"
-$env:VER = "v0.2.0"
-Copy-Item $env:APK ".\anti-car-sickness-rn.apk" -Force
+$env:VER = "v0.3.4"
+# 产物名直接带版本号；gh 的资产名取自文件名，
+# 不要用旧写法 "path#label"（PowerShell 传参下不生效，GitHub 上会变成裸文件名）
+Copy-Item $env:APK ".\anti-motion-sickness-$env:VER.apk" -Force
 git tag -a $env:VER -m $env:VER
 git push origin main; git push origin $env:VER
-& "C:\Program Files\GitHub CLI\gh.exe" release upload $env:VER ".\anti-car-sickness-rn.apk#anti-motion-sickness-$env:VER.apk" --repo sctale/anti-motion-sickness --clobber
+& "C:\Program Files\GitHub CLI\gh.exe" release upload $env:VER ".\anti-motion-sickness-$env:VER.apk" --repo sctale/anti-motion-sickness --clobber
 ```
 
 ---
@@ -478,16 +481,16 @@ git tag -a v0.2.1 -m v0.2.1
 git push origin v0.2.1
 
 # ===== gh Release =====
-# 创建 release
-& "C:\Program Files\GitHub CLI\gh.exe" release create v0.2.1 `
-  ".\anti-car-sickness-rn.apk#anti-motion-sickness-v0.2.1.apk" `
+# 创建 release（正文取自 CHANGELOG 对应版本小节，不要再用 release_notes.md）
+& "C:\Program Files\GitHub CLI\gh.exe" release create v0.3.4 `
+  ".\anti-motion-sickness-v0.3.4.apk" `
   --repo sctale/anti-motion-sickness `
-  --title "v0.2.1" `
-  --notes-file release_notes.md
+  --title "v0.3.4" `
+  --notes-file "$env:TEMP\anti-motion-sickness-v0.3.4-notes.md"
 
 # 覆盖 release APK
-& "C:\Program Files\GitHub CLI\gh.exe" release upload v0.2.1 `
-  .\anti-car-sickness-rn.apk#anti-motion-sickness-v0.2.1.apk `
+& "C:\Program Files\GitHub CLI\gh.exe" release upload v0.3.4 `
+  .\anti-motion-sickness-v0.3.4.apk `
   --repo sctale/anti-motion-sickness --clobber
 
 # 删除 release

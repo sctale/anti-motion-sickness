@@ -30,7 +30,8 @@ $ProjectRoot = $PSScriptRoot
 $AppJson = Join-Path $ProjectRoot "app.json"
 $PackageJson = Join-Path $ProjectRoot "package.json"
 $ApkSource = Join-Path $ProjectRoot "android\app\build\outputs\apk\release\app-release.apk"
-$ApkDest = Join-Path $ProjectRoot "anti-car-sickness-rn.apk"
+# 产物文件名在解析出版本号后确定（带版本，与 README 的下载说明一致）
+$ApkDest = $null
 
 # Android SDK 工具路径（按 build-tools 版本从高到低挑，避免硬编码 34.0.0）
 $AndroidSdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } elseif ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { Join-Path $env:LOCALAPPDATA "Android\Sdk" }
@@ -113,6 +114,25 @@ function Invoke-NativeCommand {
     }
 
     return [pscustomobject]@{ ExitCode = $exit; Output = $text }
+}
+
+<#
+  从 CHANGELOG.md 里取出当前版本那一节，作为 Release 正文。
+  以前是先找根目录的 release_notes.md（该文件被 .gitignore 忽略、内容常年是旧版本），
+  结果 v0.3.3/v0.3.4 的 Release 正文写的都是 v0.2.2 的说明。
+#>
+function Get-ChangelogSection {
+    param(
+        [string]$Path,
+        [string]$Version
+    )
+
+    if (-not (Test-Path $Path)) { return $null }
+    $raw = Get-Content $Path -Raw -Encoding UTF8
+    $escaped = [regex]::Escape($Version)
+    $match = [regex]::Match($raw, "(?ms)^\s*## \[$escaped\].*?(?=^\s*## \[|\z)")
+    if (-not $match.Success) { return $null }
+    return $match.Value.Trim()
 }
 
 function Get-RepoOwner {
@@ -241,6 +261,11 @@ if ($BumpType -ne "none") {
     Write-Step "2/8 跳过版本号升级（当前 $currentVersion）"
 }
 
+# 产物与资产名：anti-motion-sickness-vX.Y.Z.apk（与 README/AGENTS 的下载说明一致）
+$ApkDest = Join-Path $ProjectRoot "anti-motion-sickness-v$newVersion.apk"
+$legacyApk = Join-Path $ProjectRoot "anti-car-sickness-rn.apk"
+Write-Host "  产物: $((Split-Path $ApkDest -Leaf))"
+
 # ============== 步骤 3: Git 提交版本号变更 ==============
 if ($BumpType -ne "none") {
     Write-Step "3/8 提交版本号变更"
@@ -365,6 +390,9 @@ if (-not (Test-Path $ApkSource)) {
 
 Copy-Item $ApkSource $ApkDest -Force
 Write-Success "已复制到: $ApkDest"
+if (Test-Path $legacyApk) {
+    Write-Warn "旧版无版本号产物仍存在：$((Split-Path $legacyApk -Leaf))（可自行删除，现在一律输出带版本号的包名）"
+}
 
 if ($Aapt -and (Test-Path $Aapt)) {
     $aaptOutput = & $Aapt dump badging $ApkDest 2>&1 | Select-String "package:"
@@ -417,7 +445,6 @@ if (-not (Test-Path $Gh)) {
 
 # 创建 / 推送 tag
 $tagName = "v$newVersion"
-$apkAsset = "$ApkDest#anti-motion-sickness-$tagName.apk"
 
 $existingTag = Invoke-NativeCommand -AllowFailure { git -C $ProjectRoot rev-parse -q --verify "refs/tags/$tagName" }
 if ($existingTag.ExitCode -eq 0 -and $existingTag.Output) {
@@ -434,14 +461,21 @@ if ($pushTag.ExitCode -ne 0) {
 }
 Write-Success "tag $tagName 已推送"
 
-# release notes
-if (-not $NotesFile) {
-    $NotesFile = Join-Path $ProjectRoot "release_notes.md"
+# Release 正文：显式 -NotesFile > CHANGELOG 当前版本小节 > 兜底一句话
+# （不再回落到根目录 release_notes.md —— 它被 gitignore 忽略、内容常年是旧版本）
+$notesPath = $NotesFile
+if ($notesPath -and -not (Test-Path $notesPath)) {
+    Write-Err "指定的 -NotesFile 不存在: $notesPath"
+    exit 1
 }
-if (-not (Test-Path $NotesFile)) {
-    $changelogPath = Join-Path $ProjectRoot "CHANGELOG.md"
-    if (Test-Path $changelogPath) {
-        $NotesFile = $changelogPath
+if (-not $notesPath) {
+    $section = Get-ChangelogSection -Path (Join-Path $ProjectRoot "CHANGELOG.md") -Version $newVersion
+    if ($section) {
+        $notesPath = Join-Path $env:TEMP "anti-motion-sickness-$tagName-notes.md"
+        Write-Utf8NoBom -Path $notesPath -Content $section
+        Write-Success "Release 正文取自 CHANGELOG.md 的 [$newVersion] 小节"
+    } else {
+        Write-Warn "CHANGELOG.md 没有 [$newVersion] 小节，Release 正文使用兜底文案"
     }
 }
 
@@ -452,11 +486,12 @@ if ($releaseView.ExitCode -ne 0) {
     $createArgs = @(
         "release", "create", $tagName,
         "--repo", $repoSlug,
-        "--title", $tagName,
-        "--notes", "v$newVersion（详见 CHANGELOG.md）"
+        "--title", $tagName
     )
-    if (Test-Path $NotesFile) {
-        $createArgs = @("release", "create", $tagName, "--repo", $repoSlug, "--title", $tagName, "--notes-file", $NotesFile)
+    if ($notesPath) {
+        $createArgs += @("--notes-file", $notesPath)
+    } else {
+        $createArgs += @("--notes", "v$newVersion（详见 CHANGELOG.md）")
     }
     if ($Draft) {
         $createArgs += "--draft"
@@ -468,10 +503,25 @@ if ($releaseView.ExitCode -ne 0) {
     }
     Write-Success "Release $tagName 已创建"
 } else {
-    Write-Success "Release $tagName 已存在，上传覆盖 APK"
+    Write-Success "Release $tagName 已存在"
+    # 已存在的 Release 也要刷新正文：否则补写了 CHANGELOG 小节，
+    # 重新跑发布时 GitHub 上还挂着上一次的说明
+    if ($notesPath) {
+        $edit = Invoke-NativeCommand -AllowFailure {
+            & $Gh release edit $tagName --repo $repoSlug --notes-file $notesPath
+        }
+        if ($edit.ExitCode -ne 0) {
+            Write-Warn "Release 正文更新失败：$($edit.Output)"
+        } else {
+            Write-Success "Release 正文已按 CHANGELOG 更新"
+        }
+    }
+    Write-Success "上传覆盖 APK"
 }
 
-$upload = Invoke-NativeCommand -AllowFailure { & $Gh release upload $tagName $apkAsset --repo $repoSlug --clobber }
+# 资产名直接由文件名决定（不再用 path#label 语法：在 PowerShell 传参下不生效，
+# 结果 GitHub 上的资产一直叫 anti-car-sickness-rn.apk，和文档承诺的名字不一致）
+$upload = Invoke-NativeCommand -AllowFailure { & $Gh release upload $tagName $ApkDest --repo $repoSlug --clobber }
 if ($upload.ExitCode -ne 0) {
     Write-Err "APK 上传失败：$($upload.Output)"
     exit 1
