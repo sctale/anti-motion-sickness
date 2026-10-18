@@ -396,8 +396,8 @@ git push origin main; git push origin $env:VER
 | 脚本 | 作用 |
 |------|------|
 | `release.ps1` | 一键发布到 GitHub Release（推荐入口） |
-| `tools/icons/render.mjs` | 重新生成 `assets/*.png` 图标（设计稿即代码；`npm i --no-save sharp && node tools/icons/render.mjs`，并会输出 `tools/icons/preview.png` 遮罩预览） |
-| `replace_icons.ps1` | 把 `assets/*.png` 替换到 `android/app/src/main/res/mipmap-*/` |
+| `tools/icons/render.mjs` | 设计稿即代码：重跑生成 `assets/*.png`（桌面/前景/背景/单色/启动页/favicon）+ `native/res/drawable/ic_stat_motion.xml`（通知栏与磁贴的素描矢量）+ 遮罩/尺寸/通知图标三张预览。`sharp` 已是 devDependency，直接 `node tools/icons/render.mjs` 即可，**不要再用 `--no-save` 装**（会被下次 install 剪掉）。固定种子，重跑逐字节一致 |
+| `replace_icons.ps1` | 把 `assets/*.png` 转成各 dpi 的 webp 写入 `mipmap-*/`。每条转换先删旧产物、再校验退出码与文件大小，源 PNG 缺一个就报错退出 —— 不允许「静默转出一半」 |
 
 > 所有脚本都使用 `$PSScriptRoot` 解析路径，可在任意位置调用。
 
@@ -455,7 +455,10 @@ $env:GH_TOKEN = "ghp_xxx"
 ### APK 图标没改
 
 - 原因：`assets/icon.png` 改了但 `android/app/src/main/res/mipmap-*/ic_launcher*.webp` 没更新
-- 解决：运行 `powershell -ExecutionPolicy Bypass -File replace_icons.ps1`
+- 解决：运行 `powershell -ExecutionPolicy Bypass -File replace_icons.ps1`（失败会以非零码退出，`release.ps1` 因此中止发布，不再告警继续）
+- **通知栏 / 磁贴图标是另一条链路**：`native/res/drawable/ic_stat_motion.xml`（由 render.mjs 生成）
+  由 Config Plugin 复制进 `android/.../res/drawable/`。桌面换成素描而通知栏仍是模板符号，就是这条没跑；
+  `release.ps1` 会比对两者 SHA256 是否一致。
 
 ### APK 版本号不对
 

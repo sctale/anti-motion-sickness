@@ -28,6 +28,50 @@ Windows PowerShell 5.1 对无 BOM 的 UTF-8 默认按 ANSI/GBK 解码，
 
 ---
 
+## [0.3.18] - 2026-10-18
+
+### ✨ 补齐：通知栏与 Quick Settings 磁贴的图标也换成素描版
+
+之前的「素描图标」只换到了桌面与启动页：**通知栏小图标和磁贴图标仍然是模板自带的通用符号**
+（一个 24dp 的人形/符号矢量），同一个 App 出现两套视觉语言。
+规格轴审查指出这一点后核对确认：`plugins/withOverlayModule.js` 里内联的
+`ic_stat_motion.xml` 早于素描工作，且被通知与磁贴共用。
+
+- 通知/磁贴图标改由 `tools/icons/render.mjs` 生成到 `native/res/drawable/ic_stat_motion.xml`，
+  **复用同一批素描生成器**（`roughPolyline` / 固定种子抖动），所以它是「同一只手画的」而不是照描的：
+  车身 + 车窗 + 两个实心轮点 + 左右各 3 个提示点，24dp 单色蒙版。
+- 线宽是按真实尺寸定的：第一版描边 1.8dp，在 24dp 上直接把车身糊成两坨白饼
+  （预览图上一眼可见），改成 1.03dp / 0.8dp 并去掉「圆圈车轮」后才读得清。
+  新增 `tools/icons/notification-preview.png`，按 96 / 72 / 48 / 24px 四档并排，
+  **对着 24px 那一格判断可辨识性**，不看放大图自欺欺人。
+- Config Plugin 改为优先使用生成物，缺失时退回旧符号并**大声告警**，
+  不再静默产出「桌面素描 + 通知栏模板符号」的分裂包。
+
+### 🛠 构建链：图标这一步再也不能静默失败
+
+- `replace_icons.ps1` 重写：`ffmpeg` 路径改为「先试已知位置再查 PATH，都没有就报错退出」；
+  每条转换**先删旧产物**再检查退出码 / 文件存在 / 文件非空 —— 以前所有调用都是
+  `2>$null | Out-Null` 且不判断结果，转换失败时旧文件原样留着、日志照样打
+  「All icons replaced!」，这正是 v0.3.11 启动页占位图混过去的原因。
+  同时校验 `assets/` 四个源 PNG 都在，避免「转出一半图标」。
+  （仍保留本机那条坑：ffmpeg 进度写 stderr，调用期间要临时放宽 `ErrorActionPreference`。）
+- `release.ps1`：图标替换失败从「告警继续」改为**中止发布**；
+  并新增产物侧核对 —— `android/.../drawable/ic_stat_motion.xml` 必须与
+  `native/res/drawable/ic_stat_motion.xml` 逐字节一致（SHA256 比较），
+  不一致说明插件没生效或复用了旧目录。
+
+### 🧪 验证
+
+- `node tools/icons/render.mjs` 重跑后 `assets/*.png` **逐字节未变**（固定种子的可复现性再次成立），
+  新增产物只有通知图标 XML 与预览图；
+- 预览图四档已实际查看：24px 下车身轮廓与六个提示点仍可分辨；
+- prebuild 后注入文件与源文件 SHA256 相同，插件日志显示来源为素描版；
+- `release.ps1` / `replace_icons.ps1` 通过 PS 5.1 解析器检查（0 errors），
+  `replace_icons.ps1` 实跑产出 25 个 webp；`node --check` 通过；
+  `tsc --noEmit` 与验证台 18 组 65 断言通过（本轮未触碰算法）。
+
+---
+
 ## [0.3.17] - 2026-10-18
 
 ### 🐛 修复：桌面名字还是工程 slug —— 撤回上一轮那条没生效的修复
