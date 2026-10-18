@@ -9,12 +9,17 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
+import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -27,6 +32,12 @@ import androidx.core.content.ContextCompat
  * - 屏幕息屏时注销传感器，亮屏恢复（省电）
  * - 通知栏提供「停止」操作（对应 Google 的「点通知关闭」）
  * - 自动模式：检测到车辆运动才显示圆点，静止一段时间后淡出
+ *
+ * 运行模型（避免常驻服务发热）：
+ * - 传感器回调跑在独立的 [HandlerThread]，不占用主线程；
+ * - 多路传感器（旋转矢量 / 陀螺仪 / 线性加速度）各自到事件只做「存最新值」，
+ *   真正的融合+绘图刷新按 [TARGET_UI_HZ] 合并执行一次，不做每事件全量重算；
+ * - 所有中间数组复用，传感器链路上不再 per-event 分配对象。
  */
 class OverlayService : Service(), SensorEventListener {
 
@@ -35,14 +46,20 @@ class OverlayService : Service(), SensorEventListener {
     private val cueEngine = MotionCueEngine()
     private var overlayManager: OverlayManager? = null
 
+    private var sensorThread: HandlerThread? = null
+    private var sensorHandler: Handler? = null
+
     private var rotationVectorSensor: Sensor? = null
     private var gyroSensor: Sensor? = null
     private var linearAccelSensor: Sensor? = null
     private var accelSensor: Sensor? = null
     private var gravitySensor: Sensor? = null
 
-    private val rotationVectorValues = FloatArray(4)
+    // 传感器原始值（4 槽容纳 Android 旋转矢量的 w 分量；长度单独记录）
+    private val rotationVectorRaw = FloatArray(4)
     private var rotationVectorLength = 0
+    private val rotationVector3 = FloatArray(3)
+    private val rotationVector4 = FloatArray(4)
     private val accelValues = FloatArray(3)
     private var hasAccel = false
     private val linearAccelValues = FloatArray(3)
@@ -55,11 +72,24 @@ class OverlayService : Service(), SensorEventListener {
     private var sensorsRegistered = false
     private var autoMode = true
 
+    /** 合并刷新：true 表示已排队一次延迟计算 */
+    private var pipelineScheduled = false
+    private var lastPipelineAtMs = 0L
+
+    private val pipelineRunnable = Runnable { runPipeline() }
+
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                Intent.ACTION_SCREEN_OFF -> unregisterSensors()
-                Intent.ACTION_SCREEN_ON -> registerSensors()
+                // 息屏时圆点不可见，直接停掉传感器；亮屏恢复
+                Intent.ACTION_SCREEN_OFF -> {
+                    unregisterSensors()
+                    overlayManager?.setVisible(false)
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    registerSensors()
+                    overlayManager?.setVisible(true)
+                }
             }
         }
     }
@@ -67,12 +97,16 @@ class OverlayService : Service(), SensorEventListener {
     override fun onCreate() {
         super.onCreate()
         isRunning = true
-        startForeground(NOTIFICATION_ID, buildNotification())
+        startForegroundSafely()
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         resolveSensors()
         cueEngine.autoMode = autoMode
         overlayManager = OverlayManager(this)
+
+        val thread = HandlerThread("OverlaySensor").also { it.start() }
+        sensorThread = thread
+        sensorHandler = Handler(thread.looper)
 
         registerSensors()
         ContextCompat.registerReceiver(
@@ -88,6 +122,7 @@ class OverlayService : Service(), SensorEventListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            markStopped()
             stopSelf()
             return START_NOT_STICKY
         }
@@ -99,23 +134,46 @@ class OverlayService : Service(), SensorEventListener {
 
         // 权限被撤销时不要空跑
         if (!Settings.canDrawOverlays(this)) {
+            markStopped(REASON_PERMISSION_REVOKED)
             stopSelf()
             return START_NOT_STICKY
         }
         val shown = overlayManager?.show() ?: false
         if (!shown) {
+            markStopped(REASON_OVERLAY_ADD_FAILED)
             stopSelf()
             return START_NOT_STICKY
         }
 
+        overlayShown = true
+        startReason = null
+
         return START_STICKY
+    }
+
+    /** Android 12+ 要求显式声明前台服务类型；旧版本或异常时退回无类型调用 */
+    private fun startForegroundSafely() {
+        val notification = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } catch (e: Exception) {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
     }
 
     override fun onSensorChanged(event: SensorEvent) {
         when (event.sensor.type) {
             Sensor.TYPE_ROTATION_VECTOR -> {
-                val n = minOf(event.values.size, rotationVectorValues.size)
-                System.arraycopy(event.values, 0, rotationVectorValues, 0, n)
+                val n = minOf(event.values.size, rotationVectorRaw.size)
+                System.arraycopy(event.values, 0, rotationVectorRaw, 0, n)
                 rotationVectorLength = n
             }
             Sensor.TYPE_LINEAR_ACCELERATION -> {
@@ -137,25 +195,60 @@ class OverlayService : Service(), SensorEventListener {
             else -> return
         }
 
+        schedulePipeline()
+    }
+
+    /**
+     * 多路传感器在一个刷新周期内会各自触发回调，这里合并成一次计算：
+     * 距上次不足 [TARGET_UI_HZ] 帧间隔时排队补一次，否则立即执行。
+     */
+    private fun schedulePipeline() {
+        val handler = sensorHandler ?: return
+        val now = SystemClock.elapsedRealtime()
+        val intervalMs = (1000L / TARGET_UI_HZ).toLong()
+        val elapsed = if (lastPipelineAtMs == 0L) intervalMs else now - lastPipelineAtMs
+
+        if (elapsed >= intervalMs) {
+            if (pipelineScheduled) {
+                handler.removeCallbacks(pipelineRunnable)
+                pipelineScheduled = false
+            }
+            runPipeline()
+        } else if (!pipelineScheduled) {
+            pipelineScheduled = true
+            handler.postDelayed(pipelineRunnable, intervalMs - elapsed)
+        }
+    }
+
+    private fun runPipeline() {
+        pipelineScheduled = false
+        val now = SystemClock.elapsedRealtime()
+        if (hasAccel || hasLinearAccel) lastPipelineAtMs = now
+
         val accel = if (hasAccel) accelValues else null
         val linearAccel = if (hasLinearAccel) linearAccelValues else null
-        val gravity = if (hasGravity) gravityValues else null
         if (accel == null && linearAccel == null) return
 
-        val rotationVector = if (rotationVectorLength >= 3) {
-            rotationVectorValues.copyOf(rotationVectorLength)
-        } else {
-            null
+        val rotationVector = when (rotationVectorLength) {
+            0 -> null
+            3 -> {
+                System.arraycopy(rotationVectorRaw, 0, rotationVector3, 0, 3)
+                rotationVector3
+            }
+            else -> {
+                System.arraycopy(rotationVectorRaw, 0, rotationVector4, 0, 4)
+                rotationVector4
+            }
         }
 
         val fused = fusion.update(
             rotationVector = rotationVector,
             accel = accel,
             linearAccel = linearAccel,
-            gravity = gravity,
+            gravity = if (hasGravity) gravityValues else null,
             gyro = if (hasGyro) gyroValues else null
         )
-        val cue = cueEngine.update(fused, System.currentTimeMillis())
+        val cue = cueEngine.update(fused, now)
         overlayManager?.update(cue.offsetXdp, cue.offsetYdp, cue.alpha, cue.magnitude01)
     }
 
@@ -168,9 +261,13 @@ class OverlayService : Service(), SensorEventListener {
             // 忽略未注册的情况
         }
         unregisterSensors()
+        sensorThread?.quitSafely()
+        sensorThread = null
+        sensorHandler = null
         overlayManager?.hide()
         overlayManager = null
         isRunning = false
+        overlayShown = false
         super.onDestroy()
     }
 
@@ -194,6 +291,7 @@ class OverlayService : Service(), SensorEventListener {
 
     private fun registerSensors() {
         if (sensorsRegistered) return
+        val handler = sensorHandler ?: return
         sensorsRegistered = true
         listOfNotNull(
             rotationVectorSensor,
@@ -202,16 +300,24 @@ class OverlayService : Service(), SensorEventListener {
             accelSensor,
             gravitySensor
         ).forEach {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME, handler)
         }
     }
 
     private fun unregisterSensors() {
         if (!sensorsRegistered) return
         sensorsRegistered = false
+        sensorHandler?.removeCallbacks(pipelineRunnable)
+        pipelineScheduled = false
         sensorManager.unregisterListener(this)
         fusion.reset()
         cueEngine.reset()
+    }
+
+    /** 记录本次启动失败原因，供 OverlayModule 精确报错；reason=null 表示用户主动停止 */
+    private fun markStopped(reason: String? = null) {
+        startReason = reason
+        overlayShown = false
     }
 
     private fun buildNotification(): Notification {
@@ -270,11 +376,26 @@ class OverlayService : Service(), SensorEventListener {
         const val ACTION_STOP = "com.anonymous.anticarsicknessrn.action.STOP"
         const val EXTRA_AUTO_MODE = "auto_mode"
 
+        /** 启动失败原因（供 JS 给出可读提示） */
+        const val REASON_PERMISSION_REVOKED = "PERMISSION_REVOKED"
+        const val REASON_OVERLAY_ADD_FAILED = "OVERLAY_ADD_FAILED"
+
         private const val REQUEST_CONTENT = 0
         private const val REQUEST_STOP = 1
+
+        /** 圆点刷新帧率：传感器按 GAME 采样，融合与绘制合并到该帧率即可 */
+        const val TARGET_UI_HZ = 60
 
         /** 服务真实运行状态（由 OverlayModule 查询，避免「启动成功」误报） */
         @Volatile
         var isRunning: Boolean = false
+
+        /** 悬浮窗是否真的挂上去了（比 isRunning 更接近「用户能看见圆点」） */
+        @Volatile
+        var overlayShown: Boolean = false
+
+        /** 最近一次启动失败原因；成功或用户主动停止时为 null */
+        @Volatile
+        var startReason: String? = null
     }
 }

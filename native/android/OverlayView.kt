@@ -38,6 +38,14 @@ class OverlayView(context: Context) : View(context) {
     private var offsetY = 0f
     private var viewAlpha = 0f
     private var magnitude = 0f
+    private var paused = false
+
+    /** 息屏期间暂停重绘（由 OverlayManager 调用） */
+    fun setPaused(paused: Boolean) {
+        if (this.paused == paused) return
+        this.paused = paused
+        if (!paused) postInvalidateOnAnimation()
+    }
 
     /** 由 OverlayManager 调用；位移单位 dp，alpha 与 magnitude01 范围 0~1 */
     fun setCue(offsetXdp: Float, offsetYdp: Float, alpha: Float, magnitude01: Float) {
@@ -45,12 +53,12 @@ class OverlayView(context: Context) : View(context) {
         offsetY = (offsetYdp * density).coerceIn(-maxOffsetYPx, maxOffsetYPx)
         viewAlpha = alpha.coerceIn(0f, 1f)
         magnitude = magnitude01.coerceIn(0f, 1f)
-        postInvalidateOnAnimation()
+        if (!paused) postInvalidateOnAnimation()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        if (viewAlpha <= 0.01f) return
+        if (paused || viewAlpha <= 0.01f) return
 
         val widthF = width.toFloat()
         val heightF = height.toFloat()

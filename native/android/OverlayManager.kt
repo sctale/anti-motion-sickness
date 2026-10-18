@@ -54,6 +54,15 @@ class OverlayManager(context: Context) {
         overlayView?.setCue(offsetXdp, offsetYdp, alpha, magnitude01)
     }
 
+    /**
+     * 息屏时暂停绘制、亮屏恢复。
+     * 息屏阶段传感器已经注销，若不暂停，亮屏瞬间会先画出上一段运动的过期帧。
+     */
+    fun setVisible(visible: Boolean) {
+        val view = overlayView ?: return
+        view.post { view.setPaused(!visible) }
+    }
+
     /** 移除悬浮窗 */
     fun hide() {
         val view = overlayView ?: return
