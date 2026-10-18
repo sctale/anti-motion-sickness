@@ -117,6 +117,41 @@ function Invoke-NativeCommand {
 }
 
 <#
+  停掉 Gradle 守护进程。
+
+  优先用工程自带的 gradlew --stop；但 --clean 失败过一次之后 android/ 会被删成半截、
+  gradlew 都不在了，这时只能按命令行精确匹配 GradleDaemon 进程来停
+  （只停命令行里带 GradleDaemon 的 java，不动其它 Java 程序）。
+#>
+function Stop-GradleDaemonsIfNeeded {
+    $gradlewBat = Join-Path (Join-Path $ProjectRoot "android") "gradlew.bat"
+    if (Test-Path $gradlewBat) {
+        $stop = Invoke-NativeCommand -AllowFailure { & $gradlewBat --stop }
+        if ($stop.ExitCode -eq 0) {
+            Write-Host "  已停止 Gradle 守护进程（gradlew --stop）"
+            return
+        }
+    }
+
+    $killed = 0
+    try {
+        $javaProcs = Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue
+        foreach ($proc in $javaProcs) {
+            if ("$($proc.CommandLine)" -match 'GradleDaemon') {
+                Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+                $killed++
+            }
+        }
+    } catch {
+        Write-Warn "检查 Gradle 守护进程失败：$_"
+    }
+    if ($killed -gt 0) {
+        Write-Host "  已强制停止 $killed 个 Gradle 守护进程"
+        Start-Sleep -Seconds 3
+    }
+}
+
+<#
   从 CHANGELOG.md 里取出当前版本那一节，作为 Release 正文。
   以前是先找根目录的 release_notes.md（该文件被 .gitignore 忽略、内容常年是旧版本），
   结果 v0.3.3/v0.3.4 的 Release 正文写的都是 v0.2.2 的说明。
@@ -318,11 +353,22 @@ if (-not $SkipPrebuild -and -not $UploadOnly) {
     Write-Step "4/8 Prebuild 生成原生代码"
     Push-Location $ProjectRoot
     try {
+        # Gradle 守护进程会锁住 android/app/build 下的中间产物，导致 --clean 删不掉
+        # android/ 目录（EBUSY: resource busy or locked）—— 实测踩过，而且失败后
+        # android/ 会被删成半截，只能重新生成。所以 prebuild 前先停守护进程。
+        Stop-GradleDaemonsIfNeeded
+
         # 必须 --clean：不 clean 时 android/ 会被复用，历史手改的配置长期滞留、
         # 与 app.json 悄悄漂移。实测踩过：gradle.properties 里 newArchEnabled 停在 false，
         # RN 0.85 以旧架构启动新运行时 → 点图标直接闪退。
         # 原生源码与配置项现在全部由 Config Plugin 重新注入，clean 是安全的。
         $prebuild = Invoke-NativeCommand -AllowFailure { & npx expo prebuild --platform android --no-install --clean }
+        if ($prebuild.ExitCode -ne 0 -and $prebuild.Output -match 'EBUSY') {
+            Write-Warn "prebuild 遇到 EBUSY（android/ 被占用），停守护进程后重试一次"
+            Stop-GradleDaemonsIfNeeded
+            Start-Sleep -Seconds 5
+            $prebuild = Invoke-NativeCommand -AllowFailure { & npx expo prebuild --platform android --no-install --clean }
+        }
         if ($prebuild.ExitCode -ne 0) {
             Write-Err "prebuild 失败：`n$($prebuild.Output)"
             exit 1
