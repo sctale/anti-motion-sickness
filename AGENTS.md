@@ -487,6 +487,19 @@ grep -nE "newArchEnabled|edgeToEdge|projectcachedir" android/gradle.properties
 - 兜底：万一还有别的启动崩溃，`CrashCapture` 会把上次的堆栈显示在首页，
   截图发 Issue 即可定位（不要再靠「闪退」两个字猜）。
 
+### npx 报「"node" 不是内部或外部命令 / Cannot find module …npm-prefix.js」
+
+PATH 里若有一个与真正 nodejs 安装目录同名、却只剩 `node_modules` 的目录排在前面，
+npm 自带的 `npx.cmd` 会先找自己 `%~dp0\node.exe`、找不到才退回 PATH，于是看起来像「node 没装」，
+实际打断的是 prebuild 那一步（v0.3.12 首次发布就断在这里）。
+
+`release.ps1` 步骤 1 已加守卫：比较 `node` 与 `npx` 各自所在目录，
+若 npx 那个目录里没有 `node.exe`，就把 node 的目录提到 PATH 最前并告警。
+验证方式（可复现）：把一份 `npx.cmd` 复制到一个没有 `node.exe` 的目录并置于 PATH 首位 ——
+不打守卫会失败，打完守卫 `npx --version` 正常。
+
+排查这类问题时**别只看 `node -v`**：`node` 能跑不代表 `npx` 用的是同一个 node。
+
 ### 含中文的 .ps1 在 Windows PowerShell 5.1 下解析失败
 
 - 现象：`powershell -File release.ps1` 报一串「表达式或语句中包含意外的标记」，行号指向中文字符串附近

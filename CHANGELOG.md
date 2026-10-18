@@ -1,5 +1,22 @@
 # 更新日志 (Changelog)
 
+## [未发布]
+
+### 🛠 构建链：`release.ps1` 自检 node 与 npx 是否来自同一目录
+
+PATH 里存在同名但只剩 `node_modules` 的 nodejs 目录时，npm 自带的 `npx.cmd` 先找自己
+`%~dp0\node.exe`、找不到才退回 PATH，于是报「"node" 不是内部或外部命令」，
+看起来像 node 没装，实际打断的是 `expo prebuild` 那一步（v0.3.12 首次发布就断在这里，
+浪费了一次完整构建才定位到）。
+
+步骤 1 现在比较 `node` / `npx` 的所在目录，npx 目录里没有 `node.exe` 就把 node 目录提到
+PATH 最前并告警。**已复现验证**：把一份 `npx.cmd` 复制到没有 `node.exe` 的目录并置于 PATH 首位，
+无守卫时报 `Cannot find module …npm-prefix.js`，加上守卫后 `npx --version` 正常返回。
+
+不改应用代码，因此不升版本号、不出新 APK。
+
+---
+
 ## [0.3.15] - 2026-10-18
 
 ### 🔧 重构：把圆点几何从 View 里抽成可验证的纯逻辑，并用断言守住两条老不变量

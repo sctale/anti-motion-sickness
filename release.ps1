@@ -230,6 +230,30 @@ function Get-DerivedVersionCode {
 # ============== 步骤 1: 检查环境 ==============
 Write-Step "1/8 检查环境"
 
+
+# node 与 npx 必须来自同一个目录：npm 自带的 npx.cmd 先找自己 %~dp0 下的 node.exe，
+# 找不到就退回 PATH。PATH 里若有一个同名但只剩 node_modules 的目录抢在前面，
+# npx 就会以「"node" 不是内部或外部命令 / Cannot find module ... npm-prefix.js」失败，
+# 看起来像 node 没装，实际直接把 prebuild 那步打断（v0.3.12 首次发布就断在这里）。
+# 这里不要求排查具体是哪一层遮蔽：只把 node.exe 所在目录提到 PATH 最前，
+# 已用「复制一份 npx.cmd 到没有 node.exe 的目录并置于 PATH 首位」复现并验证过。
+$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+if (-not $nodeCmd) {
+    Write-Err "未找到 node，请安装 Node.js 并确认它在 PATH 中"
+    exit 1
+}
+$npxCmd = Get-Command npx -ErrorAction SilentlyContinue
+if (-not $npxCmd) {
+    Write-Err "未找到 npx（随 Node.js 一起安装）"
+    exit 1
+}
+$nodeDir = Split-Path $nodeCmd.Source -Parent
+$npxDir = Split-Path $npxCmd.Source -Parent
+if (-not (Test-Path (Join-Path $npxDir "node.exe"))) {
+    Write-Warn "npx 所在目录（$npxDir）里没有 node.exe，已把 node 目录（$nodeDir）提到 PATH 最前"
+    $env:PATH = "$nodeDir;$env:PATH"
+}
+
 if (-not (Test-Path $AppJson)) {
     Write-Err "未找到 app.json，请在项目根目录运行"
     exit 1
@@ -609,3 +633,4 @@ Write-Host ""
 Write-Host "下载链接: https://github.com/$repoSlug/releases/tag/$tagName" -ForegroundColor Green
 Write-Host ""
 Write-Success "全部完成 ✓"
+
