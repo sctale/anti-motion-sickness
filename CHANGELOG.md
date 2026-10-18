@@ -17,6 +17,68 @@ PATH 最前并告警。**已复现验证**：把一份 `npx.cmd` 复制到没有
 
 ---
 
+## [0.3.16] - 2026-10-18
+
+### 🐛 修复：`onCreate` / `onStartCommand` 里还有一段没兜住的初始化（红线 8 的残留缺口）
+
+上一轮把 `startForeground` 和每帧计算包住了，但初始化主体仍然裸奔：
+`getSystemService(SensorService) as SensorManager` 的强转、`HandlerThread`/`Looper` 建立、
+`OverlayManager(this)`（构造一个 View）、读 SharedPreferences、注册息屏广播 ——
+这些在个别 ROM 上都会抛，而在生命周期回调里抛出去就是进程崩溃，
+症状与最初报的「点图标直接闪退」完全一致。现在整段包在 `try/catch` 内，
+失败时按新增的 `START_FAILED` 原因体面停止，并做一次 `cleanupAfterFailure()`
+（注销传感器/广播、结束线程），不留半个服务。
+
+同时把兜底范围从 `catch (Exception)` 扩到 `catch (Throwable)`：
+`NoSuchMethodError`（被 OEM 裁剪 API）、OOM 这类 `Error` 原本仍能穿透 Looper。
+
+- 新增原因并给可读文案：`NO_SENSORS`（本机没有任何可用运动传感器）、
+  `START_FAILED`（初始化本身抛错）、`SENSOR_RESTART_FAILED`（换采样档位时重建注册失败）。
+  最后一条以前借 `PIPELINE_FAILED` 的名义报出去，用户会看到「运动提示计算连续失败」，
+  正是「把真实病根盖掉」这类错误。
+- 传感器完全缺失的机器以前会静默留下一个不会动的圆点：现在直接带原因拒绝启动，
+  而不是让用户对着一排死点猜为什么没反应。
+
+### ✨ 改进：JS 致命错误也留下堆栈（错误边界接不住的那一类）
+
+`ErrorBoundary` 的注释自己写明了「只管渲染期」。真正让 App 闪退的往往是别的位置 ——
+effect 里的异步回调、定时器、原生事件订阅回调 —— 这些错误不经过任何组件，
+直接被 RN 全局处理器接走，release 包里就是进程终止、屏幕上什么都不留。
+新增 `installGlobalCrashReporter()`：在默认处理器之前把致命错误同步写入与原生崩溃同一个
+`last_crash` 键（`setStringPref` 走 `commit()`，赶在进程结束前落盘），
+然后原样转交上一任处理器 —— 只留证据，不掩盖崩溃。
+
+### 🐛 修复：桌面标签显示的是工程名「anti-car-sickness-rn」
+
+`app.json` 没设 `android.applicationName`，于是启动器图标下面印的是 slug，
+而界面里叫「防晕车助手」。补上后用 `aapt dump badging` 的 `application-label` 验证，不靠猜。
+
+### 🧹 清理：会误导后续改动的死代码与陈旧指针
+
+- `appliedSamplingLevel` 被写 6 次、从不被读，注释却宣称「分开记录才能在投递失败时重试」——
+  那个重试机制并不存在。删字段并改写注释。
+- `OverlayView` 的 `DOT_COUNT_PER_SIDE` / `MAX_SHIFT_X_DP` 兼容别名零引用，
+  而且会把 `OverlayGeometry` 的**公式冻结成快照**，等于又造出第二处真源（本项目反复踩过的坑）。删除。
+- 「🏃 跑步中」永不出现（检测只输出 IN_VEHICLE / STILL / WALKING / UNKNOWN），
+  从 `ActivityType` 与标签表一起删掉。
+- 陈旧指针修正：`AGENTS.md` 与 `src/utils/constants.ts` 仍写「绘制参数在 `OverlayView.kt`」，
+  而 v0.3.15 起几何只在 `OverlayGeometry.kt` 定义。
+- 修正**上一轮自己的夸大**：0.3.14 说静止后「最坏约 200ms 恢复跟手」。实际上弹簧的 `dt`
+  为数值稳定性被钳在 50ms（`MotionCueEngine.kt:273`），200ms 采样时积分被压慢，
+  回档到跟手约需 0.4~0.6s。这正说明「圆点显示中不降档」是必需的：
+  降档的收益只在真正等待期，不该拿行车中的响应去换。
+
+### 🧪 验证
+
+- `tsc --noEmit` 通过；验证台 18 组 65 断言通过；prebuild 后 `compileReleaseKotlin` 通过；
+  注入守卫、16KB 对齐通过。
+- 逐条 grep 核对了错误码表：原生 `reject(...)` 实际使用的 16 个码，
+  `OverlayNative.ts` 的 `OVERLAY_ERRORS` / `ERROR_TEXT` 全部覆盖
+  （审查意见里「缺 ERR_BATTERY_SETTINGS」一条经查不成立 —— 原生那个码叫 `ERR_BATTERY_STATE` 且已在表内）。
+- 未验证：真机行为仍需你确认（本环境无设备与可用模拟器）。
+
+---
+
 ## [0.3.15] - 2026-10-18
 
 ### 🔧 重构：把圆点几何从 View 里抽成可验证的纯逻辑，并用断言守住两条老不变量

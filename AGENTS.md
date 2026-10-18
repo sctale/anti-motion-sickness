@@ -158,11 +158,13 @@ src/
 | 弹簧 | ω=12 rad/s，ζ=1.0 | 无过冲，约 0.25s 跟上 |
 | 自动模式（迟滞） | 进入 0.30 m/s² 或 0.06 rad/s，需连续 600ms；维持 0.12 m/s² 或 0.02 rad/s；静止 10s 淡出（0.8s） | 短暂晃动不闪现；匀速巡航的弱信号不会闪断 |
 | 计算与重绘帧率 | 合并到 60Hz | 传感器按当前档位采样，回调跑在独立 HandlerThread |
-| 采样率（自适应） | 有运动 GAME(~50-100Hz) / 静止 20s → UI(~66ms) / 静止 120s → NORMAL(~200ms) | `SamplingPolicy`；强度达到 0.08 立刻回 GAME。息屏一律注销传感器 |
+| 采样率（自适应） | 有运动 GAME(~50-100Hz) / 静止 20s → UI(~66ms) / 静止 120s → NORMAL(~200ms) | `SamplingPolicy`；强度达到 0.08 **或圆点仍在显示**就立刻回 GAME。息屏一律注销传感器 |
+| ↳ 低档位的代价 | 从 LOW 回档到跟手约 0.4~0.6s | 弹簧的 `dt` 被钳在 50ms（数值稳定性需要），200ms 采样时积分被压慢；所以降档只发生在「圆点没在显示」的等待期，行车途中不降 |
 | 窗口类型 | TYPE_APPLICATION_OVERLAY | 系统级悬浮窗，不拦截触摸 |
 
 > 运动学参数定义于 [`native/android/MotionCueEngine.kt`](./native/android/MotionCueEngine.kt) 的 `CueConfig`；
-> 绘制参数定义于 [`native/android/OverlayView.kt`](./native/android/OverlayView.kt) 常量；
+> 圆点排布定义于 [`native/android/OverlayGeometry.kt`](./native/android/OverlayGeometry.kt)（唯一真源，`OverlayView` 只画不算）；
+> 采样档位定义于 [`native/android/SamplingPolicy.kt`](./native/android/SamplingPolicy.kt)；
 > JS 层常量见 [`src/utils/constants.ts`](./src/utils/constants.ts)。
 
 ### 算法验证（改算法后必须跑）
