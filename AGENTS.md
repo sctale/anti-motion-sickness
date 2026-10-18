@@ -416,6 +416,22 @@ $env:GH_TOKEN = "ghp_xxx"
 - 检查 `OverlayPackage` 是否在 `MainApplication` 中注册
 - 真机可以用 `adb logcat` 抓 stacktrace（开发机调试用）
 
+### 含中文的 .ps1 在 Windows PowerShell 5.1 下解析失败
+
+- 现象：`powershell -File release.ps1` 报一串「表达式或语句中包含意外的标记」，行号指向中文字符串附近
+- 根因：文件是 **UTF-8 无 BOM**。PS 5.1 对无 BOM 文件按 ANSI(GBK) 解码，UTF-8 中文被切碎后
+  会把字符串字面量截断，脚本连语法都过不了（PowerShell 7 默认 UTF-8，所以「换台机器就好了」）
+- 解决：所有含中文的 `.ps1` 一律存 **UTF-8 with BOM**；改完用语法解析自证，不用真跑：
+
+```powershell
+$t=$null; $e=$null
+[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path release.ps1),[ref]$t,[ref]$e) | Out-Null
+$e.Count   # 必须是 0
+```
+
+- 反过来，`app.json` / `package.json` 这类 JSON **不能**带 BOM（Expo 解析会报错），
+  所以 `release.ps1` 写回 JSON 用的是无 BOM UTF-8（`Write-Utf8NoBom`）。
+
 ### PowerShell 不支持 HEREDOC
 
 - 不要使用 `$(cat <<'EOF' ... EOF)` 语法

@@ -1,4 +1,4 @@
-# 一键发布脚本：prebuild -> 替换图标 -> 构建 Release APK -> 验证 -> 上传 GitHub Release
+﻿# 一键发布脚本：prebuild -> 替换图标 -> 构建 Release APK -> 验证 -> 上传 GitHub Release
 # 用法：
 #   .\release.ps1                       完整流程（默认 patch bump 0.2.0 -> 0.2.1）
 #   .\release.ps1 -BumpType minor       升级次版本号（0.2.0 -> 0.3.0）
