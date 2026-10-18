@@ -17,6 +17,7 @@ param(
 
     [switch]$SkipPrebuild,
     [switch]$SkipBuild,
+    [switch]$SkipChecks,
     [switch]$UploadOnly,
     [switch]$Draft,
     [string]$NotesFile
@@ -31,14 +32,33 @@ $PackageJson = Join-Path $ProjectRoot "package.json"
 $ApkSource = Join-Path $ProjectRoot "android\app\build\outputs\apk\release\app-release.apk"
 $ApkDest = Join-Path $ProjectRoot "anti-car-sickness-rn.apk"
 
-# Android SDK 工具路径
-$Aapt = "$env:LOCALAPPDATA\Android\Sdk\build-tools\34.0.0\aapt.exe"
-$Adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
+# Android SDK 工具路径（aapt 按 build-tools 版本从高到低自动挑选，避免硬编码 34.0.0）
+$AndroidSdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } elseif ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { Join-Path $env:LOCALAPPDATA "Android\Sdk" }
+$Aapt = $null
+if (Test-Path (Join-Path $AndroidSdk "build-tools")) {
+    $Aapt = Get-ChildItem -Path (Join-Path $AndroidSdk "build-tools") -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path (Join-Path $_.FullName "aapt.exe") } |
+        Sort-Object Name -Descending |
+        Select-Object -First 1 -ExpandProperty FullName
+    $Aapt = Join-Path $Aapt "aapt.exe"
+}
+$Adb = Join-Path $AndroidSdk "platform-tools\adb.exe"
 
 # gh CLI 完整路径
 $Gh = "C:\Program Files\GitHub CLI\gh.exe"
 
 # ============== 工具函数 ==============
+# Windows PowerShell 5.1 的 Set-Content -Encoding UTF8 会写入 BOM，
+# BOM 会让 Expo 读取 app.json / package.json 时报 JSON 解析错误，因此统一用无 BOM 写回。
+function Write-Utf8NoBom {
+    param(
+        [string]$Path,
+        [string]$Content
+    )
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Content, $encoding)
+}
+
 function Write-Step {
     param([string]$Message)
     Write-Host ""
@@ -78,7 +98,7 @@ function Update-Version {
 
     $content = Get-Content $Path -Raw -Encoding UTF8
     $newContent = $content -replace [regex]::Escape("`"$JsonKey`": `"$OldVersion`""), "`"$JsonKey`": `"$NewVersion`""
-    Set-Content -Path $Path -Value $newContent -Encoding UTF8 -NoNewline
+    Write-Utf8NoBom -Path $Path -Content $newContent
 }
 
 function Update-VersionCode {
@@ -93,7 +113,7 @@ function Update-VersionCode {
         Write-Warn "app.json 中未找到 versionCode 字段，未更新"
         return
     }
-    Set-Content -Path $Path -Value $newContent -Encoding UTF8 -NoNewline
+    Write-Utf8NoBom -Path $Path -Content $newContent
 }
 
 function Get-ParsedVersion {
@@ -177,7 +197,7 @@ if ($BumpType -ne "none") {
 
 "@
         $cl = $cl -replace "(?s)(# 更新日志[^\n]*\n+)", "`$1$newEntry"
-        Set-Content -Path $changelogPath -Value $cl -Encoding UTF8 -NoNewline
+        Write-Utf8NoBom -Path $changelogPath -Content $cl
         Write-Success "CHANGELOG.md 已添加 [$newVersion] 占位条目"
     }
 
@@ -198,6 +218,31 @@ if ($BumpType -ne "none") {
     }
 }
 
+# ============== 步骤 3.5: 前置检查（构建前拦住明显 break） ==============
+if (-not $SkipChecks -and -not $UploadOnly -and -not $SkipBuild) {
+    Write-Step "3.5/8 前置检查（tsc + 算法验证台）"
+
+    Push-Location $ProjectRoot
+    try {
+        & npx tsc --noEmit
+        if ($LASTEXITCODE -ne 0) { throw "TypeScript 类型检查失败" }
+        Write-Success "tsc --noEmit 通过"
+
+        # 算法验证台（纯 Kotlin，改过 native/android 后必须通过）
+        if (Get-Command bash -ErrorAction SilentlyContinue) {
+            & bash tools/verify/run.sh
+            if ($LASTEXITCODE -ne 0) { throw "算法验证台断言失败" }
+            Write-Success "tools/verify 全部断言通过"
+        } else {
+            Write-Warn "未找到 bash，跳过算法验证台"
+        }
+    } finally {
+        Pop-Location
+    }
+} else {
+    Write-Step "3.5/8 跳过前置检查"
+}
+
 # ============== 步骤 4: Prebuild ==============
 if (-not $SkipPrebuild -and -not $UploadOnly) {
     Write-Step "4/8 Prebuild 生成原生代码"
@@ -208,6 +253,24 @@ if (-not $SkipPrebuild -and -not $UploadOnly) {
             throw "prebuild 失败"
         }
         Write-Success "prebuild 完成"
+
+        # 陈旧原生源码守卫：Config Plugin 会按清单清理上一次注入、本次已删除的 .kt。
+        # 如果仍有「不在 native/android 里、也不是模板文件」的 .kt 残留，说明注入链有问题，
+        # 继续构建只会在 Kotlin 编译期报 unresolved reference。
+        $javaDir = Get-ChildItem -Path (Join-Path $ProjectRoot "android\app\src\main\java") -Directory -Recurse |
+            Where-Object { Test-Path (Join-Path $_.FullName "OverlayService.kt") } |
+            Select-Object -First 1 -ExpandProperty FullName
+        if ($javaDir) {
+            $expected = @((Get-ChildItem (Join-Path $ProjectRoot "native\android") -Filter *.kt).Name) +
+                @("MainActivity.kt", "MainApplication.kt")
+            $extra = (Get-ChildItem $javaDir -Filter *.kt).Name | Where-Object { $expected -notcontains $_ }
+            if ($extra) {
+                throw ("prebuild 后仍存在陈旧原生文件: $($extra -join ', ')（应由 plugins/withOverlayModule.js 清理）")
+            }
+            Write-Success "原生源码注入完整，无陈旧文件残留"
+        } else {
+            Write-Warn "未在原生产工程中找到 OverlayService.kt，Config Plugin 可能未生效"
+        }
     } finally {
         Pop-Location
     }

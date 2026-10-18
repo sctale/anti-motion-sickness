@@ -8,6 +8,26 @@ const {
 
 const DEFAULT_PACKAGE = 'com.anonymous.anticarsicknessrn';
 
+/** 记录「本插件注入过哪些 .kt」的清单文件名，放在原生包目录下 */
+const INJECTED_MANIFEST = '.overlay-injected.json';
+
+/**
+ * 清单机制引入之前（v0.1.x / v0.2.x）本插件注入过的历史文件名。
+ * 老的 android/ 目录里没有清单文件，只能靠这份名单把已被删除的类清掉，
+ * 否则残留的 MotionAnalyzer.kt / PredictionEngine.kt 会让 Kotlin 编译期
+ * 报 unresolved reference。模板自带的 MainActivity / MainApplication 不在此列。
+ */
+const LEGACY_INJECTED_FILES = [
+  'OverlayService.kt',
+  'OverlayView.kt',
+  'OverlayManager.kt',
+  'OverlayModule.kt',
+  'OverlayPackage.kt',
+  'SensorFusion.kt',
+  'MotionAnalyzer.kt',
+  'PredictionEngine.kt',
+];
+
 /** 从 app.json 的 android.package 推导包名/包路径 */
 function resolvePackage(config) {
   const pkg = config.android?.package || DEFAULT_PACKAGE;
@@ -29,7 +49,8 @@ const NOTIFICATION_ICON_XML = `<?xml version="1.0" encoding="utf-8"?>
 
 /**
  * 1) 把 native/android/*.kt 复制到原生工程包目录，并把包名行改写为实际包名；
- * 2) 写入通知小图标 drawable。
+ * 2) 清理上一次注入、本次源码集里已不存在的同名文件（历史类残留会让 Kotlin 编译失败）；
+ * 3) 写入通知小图标 drawable。
  * 这样即使执行 `expo prebuild --clean`，原生源码也能被重新注入。
  */
 function withOverlayKotlinSources(config) {
@@ -54,10 +75,40 @@ function withOverlayKotlinSources(config) {
         throw new Error(`[withOverlayModule] 未找到原生源码目录: ${sourceDir}`);
       }
 
+      // 清理陈旧注入文件：只删「本插件上次注入过、本次源码集里已不存在」的文件。
+      // Expo 模板生成的 MainActivity.kt / MainApplication.kt 不在清单里，永不误删。
+      const manifestPath = path.join(destDir, INJECTED_MANIFEST);
+      let previous = [];
+      try {
+        previous = JSON.parse(
+          await fs.promises.readFile(manifestPath, 'utf8')
+        );
+      } catch (_e) {
+        previous = [];
+      }
+
       await fs.promises.mkdir(destDir, { recursive: true });
       const files = (await fs.promises.readdir(sourceDir)).filter((f) =>
         f.endsWith('.kt')
       );
+
+      const current = new Set(files);
+      const staleCandidates = new Set([
+        ...(Array.isArray(previous) ? previous : []),
+        ...LEGACY_INJECTED_FILES,
+      ]);
+      for (const stale of staleCandidates) {
+        if (!stale.endsWith('.kt') || current.has(stale)) continue;
+        try {
+          await fs.promises.rm(path.join(destDir, stale), { force: true });
+          console.log(`[withOverlayModule] 已清理陈旧原生文件: ${stale}`);
+        } catch (e) {
+          console.warn(
+            `[withOverlayModule] 清理陈旧文件 ${stale} 失败: ${e.message}`
+          );
+        }
+      }
+
       await Promise.all(
         files.map(async (file) => {
           const raw = await fs.promises.readFile(
@@ -70,6 +121,11 @@ function withOverlayKotlinSources(config) {
           );
           await fs.promises.writeFile(path.join(destDir, file), rewritten);
         })
+      );
+
+      await fs.promises.writeFile(
+        manifestPath,
+        JSON.stringify(files, null, 2) + '\n'
       );
 
       // 通知小图标
