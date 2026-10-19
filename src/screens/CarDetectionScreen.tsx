@@ -1,44 +1,51 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  Switch,
-  StatusBar,
-  Platform,
-} from 'react-native';
+import { Animated, Easing, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'react-native';
 import { useActivityRecognition, ActivityType } from '../hooks/useActivityRecognition';
 import { useVibrationService, VibrationFrequency } from '../hooks/useVibrationService';
 import { useBooleanPreference, useStringPreference } from '../hooks/usePreference';
 import { useOverlayServiceContext } from '../hooks/OverlayServiceContext';
 import { ACTIVITY_IN_VEHICLE_CONFIDENCE } from '../utils/constants';
+import {
+  Banner,
+  Button,
+  Card,
+  Chevron,
+  FadeIn,
+  Row,
+  SectionLabel,
+  Segmented,
+  StatusDot,
+  Tap,
+  Toggle,
+} from '../components/ui';
+import { radius, space, type as t, useIsDark, useTheme } from '../theme/tokens';
 
 interface CarDetectionScreenProps {
   onExit: () => void;
 }
 
 const activityLabels: Record<ActivityType, string> = {
-  'IN_VEHICLE': '🚗 乘车中',
-  'STILL': '😌 静止',
-  'WALKING': '🚶 步行中',
-  'UNKNOWN': '❓ 检测中',
+  'IN_VEHICLE': '正在乘车',
+  'STILL': '静止',
+  'WALKING': '步行',
+  'UNKNOWN': '识别中',
 };
 
-const frequencyLabels: Record<VibrationFrequency, string> = {
-  low: '低 (3秒)',
-  medium: '中 (2秒)',
-  high: '高 (1秒)',
-};
-
-const frequencyOptions: VibrationFrequency[] = ['low', 'medium', 'high'];
+const frequencyOptions: { value: VibrationFrequency; label: string }[] = [
+  { value: 'low', label: '3 秒' },
+  { value: 'medium', label: '2 秒' },
+  { value: 'high', label: '1 秒' },
+];
 
 const PREF_VIBRATION_ENABLED = 'vibration_enabled';
 const PREF_VIBRATION_FREQUENCY = 'vibration_frequency';
 const PREF_AUTO_START_CUES = 'auto_start_cues';
 
 export const CarDetectionScreen: React.FC<CarDetectionScreenProps> = ({ onExit }) => {
+  const theme = useTheme();
+  const isDark = useIsDark();
   const [isDetectionActive, setIsDetectionActive] = useState(false);
   const [linkageHint, setLinkageHint] = useState<string | null>(null);
 
@@ -57,14 +64,13 @@ export const CarDetectionScreen: React.FC<CarDetectionScreenProps> = ({ onExit }
   );
 
   const vibrationFrequency: VibrationFrequency =
-    (frequencyOptions as string[]).includes(rawFrequency)
+    frequencyOptions.some((o) => o.value === rawFrequency)
       ? (rawFrequency as VibrationFrequency)
       : 'medium';
 
-  const {
-    currentActivity,
-    confidence,
-  } = useActivityRecognition({ isActive: isDetectionActive });
+  const { currentActivity, confidence } = useActivityRecognition({
+    isActive: isDetectionActive,
+  });
 
   const shouldVibrate = isDetectionActive && currentActivity === 'IN_VEHICLE';
 
@@ -98,7 +104,7 @@ export const CarDetectionScreen: React.FC<CarDetectionScreenProps> = ({ onExit }
     // 而且 autoStartedRef 被置位后本轮再也不会重试，等于「自动开启」悄悄坏了
     if (hasPermission !== true) {
       if (hasPermission === false) {
-        setLinkageHint('检测到乘车，但缺少悬浮窗权限，请先到 Vehicle Motion 授权');
+        setLinkageHint('检测到乘车，但缺少悬浮窗权限，请先到「防晕圆点」页授权');
         autoStartedRef.current = true;
       }
       return;
@@ -133,314 +139,209 @@ export const CarDetectionScreen: React.FC<CarDetectionScreenProps> = ({ onExit }
     }
   }, [isDetectionActive, resetCount]);
 
-  const handleFrequencyChange = useCallback(
-    (freq: VibrationFrequency) => {
-      setRawFrequency(freq);
-    },
-    [setRawFrequency]
-  );
-
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" translucent={false} />
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={onExit}>
-          <Text style={styles.backButtonText}>← 返回</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>🚗 乘车检测</Text>
-      </View>
+    <FadeIn>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.page }} edges={['top', 'left', 'right', 'bottom']}>
+        <StatusBar
+          barStyle={isDark ? 'light-content' : 'dark-content'}
+          backgroundColor={theme.page}
+          translucent={false}
+        />
 
-      <View style={styles.content}>
-        <View style={styles.statusCard}>
-          <View style={[
-            styles.statusIndicator,
-            isDetectionActive && styles.statusIndicatorActive,
-          ]} />
-          <Text style={styles.statusText}>
-            {isDetectionActive ? '检测中' : '已停止'}
-          </Text>
+        <View style={{ paddingHorizontal: space.sm, paddingTop: space.xs }}>
+          <Tap
+            onPress={onExit}
+            accessibilityLabel="返回主页"
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              padding: space.sm,
+              borderRadius: radius.control,
+              alignSelf: 'flex-start',
+            }}
+          >
+            <Chevron direction="left" color={theme.accent} />
+            <Text style={{ color: theme.accent, fontSize: t.control, marginLeft: space.xs + 2 }}>
+              返回
+            </Text>
+          </Tap>
         </View>
 
-        <View style={styles.activityCard}>
-          <Text style={styles.activityLabel}>
-            当前状态
+        <ScrollView
+          contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: space.xxl }}
+          showsVerticalScrollIndicator={false}
+        >
+          <Text
+            style={{
+              color: theme.text,
+              fontSize: t.title,
+              fontWeight: '800',
+              letterSpacing: -0.4,
+              marginTop: space.xs,
+              marginBottom: space.lg,
+            }}
+          >
+            乘车检测
           </Text>
-          <Text style={[
-            styles.activityValue,
-            currentActivity === 'IN_VEHICLE' && styles.activityValueActive,
-          ]}>
-            {activityLabels[currentActivity]}
-          </Text>
-          <View style={styles.confidenceBar}>
-            <View style={[
-              styles.confidenceFill,
-              { width: `${confidence}%` }
-            ]} />
-          </View>
-          <Text style={styles.confidenceText}>
-            置信度: {Math.round(confidence)}%
-          </Text>
-        </View>
 
-        <View style={styles.controlCard}>
-          <View style={styles.controlRow}>
-            <Text style={styles.controlLabel}>启动检测</Text>
-            <Switch
-              value={isDetectionActive}
-              onValueChange={handleToggleDetection}
-              trackColor={{ false: '#E2E8F0', true: '#6366F1' }}
-              thumbColor="#fff"
+          <Card>
+            <Row
+              first
+              title={isDetectionActive ? `当前${activityLabels[currentActivity]}` : '检测未开启'}
+              detail={
+                isDetectionActive
+                  ? '靠加速度计的节奏判断是否在车里；离开本页会停止检测'
+                  : '打开下面的开关，开始用加速度计判断你是否在乘车'
+              }
+              accessory={<StatusDot on={isDetectionActive} size={12} />}
             />
-          </View>
+            <ConfidenceBar value={isDetectionActive ? confidence : 0} />
+          </Card>
 
-          <View style={styles.controlRow}>
-            <Text style={styles.controlLabel}>震动反馈</Text>
-            <Switch
-              value={vibrationEnabled}
-              onValueChange={setVibrationEnabled}
-              trackColor={{ false: '#E2E8F0', true: '#6366F1' }}
-              thumbColor="#fff"
+          {linkageHint ? <Banner tone="info" title={linkageHint} /> : null}
+
+          <SectionLabel>检测与提醒</SectionLabel>
+          <Card>
+            <Row
+              first
+              title="启动检测"
+              detail="只在本页打开期间运行；离开或返回主页即停止"
+              accessory={
+                <Toggle
+                  value={isDetectionActive}
+                  onChange={handleToggleDetection}
+                  accessibilityLabel="启动检测"
+                />
+              }
             />
-          </View>
-
-          <View style={styles.frequencySection}>
-            <Text style={styles.controlLabel}>震动频率</Text>
-            <View style={styles.frequencyButtons}>
-              {frequencyOptions.map((freq) => (
-                <TouchableOpacity
-                  key={freq}
-                  style={[
-                    styles.frequencyButton,
-                    vibrationFrequency === freq && styles.frequencyButtonActive,
-                  ]}
-                  onPress={() => handleFrequencyChange(freq)}
-                >
-                  <Text style={[
-                    styles.frequencyButtonText,
-                    vibrationFrequency === freq && styles.frequencyButtonTextActive,
-                  ]}>
-                    {frequencyLabels[freq]}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          <View style={styles.controlRow}>
-            <View style={styles.controlLabelBlock}>
-              <Text style={styles.controlLabel}>乘车时自动开启圆点</Text>
-              <Text style={styles.controlSubLabel}>
-                检测到 IN_VEHICLE 后直接启动防晕车悬浮窗（仅在本页检测开启期间有效）
+            <Row
+              title="震动反馈"
+              detail="乘车状态下按下面的节奏震动"
+              accessory={
+                <Toggle
+                  value={vibrationEnabled}
+                  onChange={setVibrationEnabled}
+                  accessibilityLabel="震动反馈"
+                  disabled={!isDetectionActive}
+                />
+              }
+            />
+            <View
+              style={{
+                paddingHorizontal: space.lg,
+                paddingBottom: space.lg,
+                paddingTop: space.lg,
+                borderTopWidth: 1,
+                borderTopColor: theme.separator,
+              }}
+            >
+              <Text style={{ color: theme.text, fontSize: t.body, fontWeight: '500', marginBottom: space.md }}>
+                震动节奏
               </Text>
+              <Segmented
+                options={frequencyOptions}
+                value={vibrationFrequency}
+                onChange={setRawFrequency}
+                accessibilityLabel="震动节奏"
+              />
             </View>
-            <Switch
-              value={autoStartCues}
-              onValueChange={setAutoStartCues}
-              trackColor={{ false: '#E2E8F0', true: '#6366F1' }}
-              thumbColor="#fff"
+            <Row
+              title="乘车时自动开启圆点"
+              detail="识别到乘车就直接把防晕圆点开起来，不用回主页再点一次（仅本页检测期间有效）"
+              accessory={
+                <Toggle
+                  value={autoStartCues}
+                  onChange={setAutoStartCues}
+                  accessibilityLabel="乘车时自动开启圆点"
+                />
+              }
             />
-          </View>
+          </Card>
 
-          {linkageHint !== null && (
-            <Text style={styles.linkageHint}>{linkageHint}</Text>
-          )}
-        </View>
+          <SectionLabel>本次会话</SectionLabel>
+          <Card>
+            <Row
+              first
+              title="已震动"
+              detail={`${vibrationCount} 次`}
+              accessory={
+                vibrationCount > 0 ? (
+                  <Button label="清零" variant="soft" onPress={resetCount} style={{ height: 36, paddingHorizontal: space.lg }} />
+                ) : null
+              }
+            />
+          </Card>
 
-        <View style={styles.statsCard}>
-          <Text style={styles.statsLabel}>震动统计</Text>
-          <Text style={styles.statsValue}>{vibrationCount}</Text>
-          <Text style={styles.statsUnit}>次震动</Text>
-        </View>
-      </View>
-
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>
-          💡 提示：乘车时保持手机平稳放置。检测只在本页打开期间进行，
-          离开或退出本页即停止；已经开启的圆点由后台服务继续负责
-        </Text>
-      </View>
-    </SafeAreaView>
+          <Text
+            style={{
+              color: theme.textTertiary,
+              fontSize: t.footnote,
+              lineHeight: 19,
+              marginTop: space.lg,
+              paddingHorizontal: space.xs,
+            }}
+          >
+            提示：把手机放在腿上或杯架里最准；拿在手里频繁晃动会被判成步行。
+          </Text>
+        </ScrollView>
+      </SafeAreaView>
+    </FadeIn>
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 10 : 20,
-    paddingBottom: 10,
-  },
-  backButton: {
-    paddingVertical: 8,
-    paddingRight: 16,
-  },
-  backButtonText: {
-    fontSize: 16,
-    color: '#6366F1',
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1E293B',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  statusCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 16,
-  },
-  statusIndicator: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#94A3B8',
-    marginRight: 12,
-  },
-  statusIndicatorActive: {
-    backgroundColor: '#22C55E',
-  },
-  statusText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1E293B',
-  },
-  activityCard: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 16,
-    marginBottom: 16,
-    alignItems: 'center',
-  },
-  activityLabel: {
-    fontSize: 14,
-    color: '#64748B',
-    marginBottom: 8,
-  },
-  activityValue: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#1E293B',
-    marginBottom: 16,
-  },
-  activityValueActive: {
-    color: '#6366F1',
-  },
-  confidenceBar: {
-    width: '100%',
-    height: 8,
-    backgroundColor: '#E2E8F0',
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  confidenceFill: {
-    height: '100%',
-    backgroundColor: '#6366F1',
-    borderRadius: 4,
-  },
-  confidenceText: {
-    fontSize: 12,
-    color: '#94A3B8',
-  },
-  controlCard: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 16,
-    marginBottom: 16,
-  },
-  controlRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  controlLabel: {
-    fontSize: 16,
-    color: '#1E293B',
-  },
-  controlLabelBlock: {
-    flex: 1,
-    marginRight: 12,
-  },
-  controlSubLabel: {
-    fontSize: 12,
-    color: '#64748B',
-    lineHeight: 17,
-    marginTop: 4,
-  },
-  linkageHint: {
-    marginTop: 12,
-    fontSize: 13,
-    color: '#4F46E5',
-    lineHeight: 19,
-  },
-  frequencySection: {
-    marginTop: 8,
-  },
-  frequencyButtons: {
-    flexDirection: 'row',
-    marginTop: 12,
-    gap: 12,
-  },
-  frequencyButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: '#F1F5F9',
-    alignItems: 'center',
-  },
-  frequencyButtonActive: {
-    backgroundColor: '#6366F1',
-  },
-  frequencyButtonText: {
-    fontSize: 14,
-    color: '#64748B',
-  },
-  frequencyButtonTextActive: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-  statsCard: {
-    backgroundColor: '#6366F1',
-    padding: 24,
-    borderRadius: 16,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  statsLabel: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
-    marginBottom: 8,
-  },
-  statsValue: {
-    fontSize: 48,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  statsUnit: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
-  },
-  footer: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-  },
-  footerText: {
-    fontSize: 13,
-    color: '#94A3B8',
-    textAlign: 'center',
-  },
-});
+/**
+ * 置信度条。
+ *
+ * 之前是直接 `width: ${confidence}%`，传感器每来一次结果就硬跳一次，看起来像坏掉的进度条；
+ * 这里改成 scaleX + native driver，数值变化被补间成连续动作 —— 这类「有过程」的细节
+ * 就是所谓流畅感的主要来源。
+ */
+function ConfidenceBar({ value }: { value: number }): React.JSX.Element {
+  const theme = useTheme();
+  const ratio = Math.max(0, Math.min(1, value / 100));
+  const anim = useRef(new Animated.Value(ratio)).current;
 
-export default CarDetectionScreen;
+  useEffect(() => {
+    Animated.timing(anim, {
+      toValue: ratio,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false, // 需要改 width，native driver 不支持布局属性
+    }).start();
+  }, [ratio, anim]);
+
+  const width = anim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
+
+  return (
+    <View
+      style={{
+        paddingHorizontal: space.lg,
+        paddingTop: space.md,
+        paddingBottom: space.lg,
+        borderTopWidth: 1,
+        borderTopColor: theme.separator,
+      }}
+    >
+      <View
+        style={{
+          height: 6,
+          borderRadius: radius.pill,
+          backgroundColor: theme.cardAlt,
+          overflow: 'hidden',
+        }}
+      >
+        <Animated.View
+          style={{
+            height: '100%',
+            width,
+            borderRadius: radius.pill,
+            backgroundColor: ratio >= 0.7 ? theme.positive : theme.accent,
+          }}
+        />
+      </View>
+      <Text style={{ color: theme.textTertiary, fontSize: t.caption, marginTop: space.sm }}>
+        识别可信度 {Math.round(value)}%
+      </Text>
+    </View>
+  );
+}

@@ -1,13 +1,5 @@
 import React, { useState } from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  TouchableOpacity,
-  Platform,
-  StatusBar,
-  ScrollView,
-} from 'react-native';
+import { View, Text, StatusBar, ScrollView } from 'react-native';
 import Constants from 'expo-constants';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { OverlayServiceProvider, useOverlayServiceContext } from './src/hooks/OverlayServiceContext';
@@ -17,6 +9,17 @@ import { LAST_CRASH_KEY } from './src/utils/constants';
 import { installGlobalCrashReporter } from './src/utils/globalCrashReporter';
 import { VehicleMotionScreen } from './src/screens/VehicleMotionScreen';
 import { CarDetectionScreen } from './src/screens/CarDetectionScreen';
+import {
+  Banner,
+  Button,
+  Card,
+  Chevron,
+  FadeIn,
+  Row,
+  SectionLabel,
+  StatusDot,
+} from './src/components/ui';
+import { space, type as t, useIsDark, useTheme } from './src/theme/tokens';
 
 // 必须早于任何可能抛错的代码：错误边界只接得住渲染期，effect/定时器/原生事件回调里的
 // 致命错误要走全局处理器，趁进程终止前把原因同步落盘。
@@ -40,32 +43,9 @@ export default function App() {
 }
 
 /**
- * 上次启动的崩溃现场。
- *
- * 原生 CrashCapture 与 JS ErrorBoundary 都写同一个偏好键，所以这里一次读出来就能覆盖两类崩溃。
- * 「点图标就闪退」在没有真机日志时是没法排查的 —— 让 App 自己把原因显示在首页，
- * 用户截一张图就等于交出了 stacktrace。
+ * 三个界面共用一个 provider（见 OverlayServiceContext），这里只做整屏替换：
+ * 进出场由各自的 FadeIn 负责，所以切页不再是「瞬间蹦出来」。
  */
-function CrashReportCard() {
-  const [crash, setCrash] = useStringPreference(LAST_CRASH_KEY, '');
-  if (!crash) return null;
-
-  return (
-    <View style={styles.crashCard}>
-      <Text style={styles.crashTitle}>⚠️ 上次启动发生了崩溃</Text>
-      <ScrollView style={styles.crashLog} nestedScrollEnabled>
-        <Text style={styles.crashText}>{crash}</Text>
-      </ScrollView>
-      <Text style={styles.crashHint}>
-        把上面这段截图发到 GitHub Issue，就能直接定位原因（比「闪退」两个字有用得多）。
-      </Text>
-      <TouchableOpacity style={styles.crashClear} onPress={() => setCrash('')}>
-        <Text style={styles.crashClearText}>已知晓，清除提示</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
 function RootNavigator() {
   const [screen, setScreen] = useState<Screen>('home');
 
@@ -77,295 +57,194 @@ function RootNavigator() {
     return <CarDetectionScreen onExit={() => setScreen('home')} />;
   }
 
+  return <Home onOpen={setScreen} />;
+}
+
+function Home({ onOpen }: { onOpen: (s: Screen) => void }): React.JSX.Element {
+  const theme = useTheme();
+  const isDark = useIsDark();
+  const { isRunning, hasPermission, isSupported } = useOverlayServiceContext();
+
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
-      <StatusBar
-        barStyle="dark-content"
-        backgroundColor="#F8FAFC"
-        translucent={false}
-      />
-
-      <View style={styles.header}>
-        <Text style={styles.title}>🚗 防晕车助手</Text>
-        <Text style={styles.subtitle}>iOS Vehicle Motion Cues 风格</Text>
-      </View>
-
-      <ScrollView contentContainerStyle={styles.content}>
-        <CrashReportCard />
-
-        <FeatureCard
-          icon="🚗"
-          title="Vehicle Motion"
-          description="基于原生 Android 传感器融合 + 实时悬浮窗的视觉反馈，在其他应用上显示防晕车圆点"
-          buttonLabel="启动 Vehicle Motion"
-          badge={<RunningBadge />}
-          onPress={() => setScreen('vehicleMotion')}
+    <FadeIn distance={0}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.page }} edges={['top', 'left', 'right', 'bottom']}>
+        <StatusBar
+          barStyle={isDark ? 'light-content' : 'dark-content'}
+          backgroundColor={theme.page}
+          translucent={false}
         />
 
-        <FeatureCard
-          icon="📳"
-          title="乘车检测"
-          description="用加速度计判断是否处于乘车状态，检测期间自动震动反馈（仅本页打开时有效）"
-          buttonLabel="启动乘车检测"
-          onPress={() => setScreen('carDetection')}
-        />
+        <ScrollView
+          contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: space.xxl }}
+          showsVerticalScrollIndicator={false}
+        >
+          <Text
+            style={{
+              color: theme.text,
+              fontSize: 30,
+              fontWeight: '800',
+              letterSpacing: -0.6,
+              marginTop: space.xl,
+            }}
+          >
+            防晕车助手
+          </Text>
+          <Text
+            style={{
+              color: theme.textSecondary,
+              fontSize: t.control,
+              lineHeight: 21,
+              marginTop: space.sm,
+              marginBottom: space.xl,
+            }}
+          >
+            在屏幕两侧显示随车辆运动流动的点，让眼睛和内耳收到同一个信号。
+          </Text>
 
-        <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>技术架构</Text>
-          <InfoRow text="原生 Foreground Service 后台运行" />
-          <InfoRow text="TYPE_APPLICATION_OVERLAY 系统级悬浮窗" />
-          <InfoRow text="旋转矢量 + 线性加速度 + 陀螺仪，世界坐标系融合" />
-          <InfoRow text="姿态自适应方向映射 + 临界阻尼弹簧平滑" />
-          <InfoRow text="自动模式：检测到车辆运动显示，静止后淡出" />
-          <InfoRow text="覆盖微信、浏览器等任何 App" />
-          <InfoRow text="完整适配 Android 16 (API 36)" />
-        </View>
-      </ScrollView>
+          <CrashReportCard />
 
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>
-          💡 提示：首次启动需要授予悬浮窗权限
-        </Text>
-        <Text style={styles.versionText}>v{APP_VERSION} - Native Overlay · Android 16</Text>
-      </View>
-    </SafeAreaView>
+          {isSupported && hasPermission === false ? (
+            <Banner
+              tone="warning"
+              title="还没有悬浮窗权限"
+              body="不授权的话圆点只能显示在本 App 里，盖不到微信、浏览器上。"
+              action={
+                <Button
+                  label="进入防晕圆点页授权"
+                  variant="soft"
+                  onPress={() => onOpen('vehicleMotion')}
+                />
+              }
+            />
+          ) : null}
+
+          <SectionLabel>功能</SectionLabel>
+          <Card>
+            <Row
+              first
+              title="防晕圆点"
+              detail="常驻后台运行，覆盖在其他应用之上；息屏自动暂停省电"
+              accessory={
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {isRunning ? (
+                    <>
+                      <StatusDot on size={9} />
+                      <Text
+                        style={{
+                          color: theme.positive,
+                          fontSize: t.footnote,
+                          fontWeight: '700',
+                          marginHorizontal: space.sm,
+                        }}
+                      >
+                        显示中
+                      </Text>
+                    </>
+                  ) : null}
+                  <Chevron direction="right" color={theme.textTertiary} />
+                </View>
+              }
+              onPress={() => onOpen('vehicleMotion')}
+            />
+            <Row
+              title="乘车检测"
+              detail="用加速度计判断是否正在乘车，检测期间按节奏震动提醒"
+              accessory={<Chevron direction="right" color={theme.textTertiary} />}
+              onPress={() => onOpen('carDetection')}
+            />
+          </Card>
+
+          <SectionLabel>怎么用</SectionLabel>
+          <Card>
+            <Row
+              first
+              title="上车前打开「防晕圆点」→ 开始显示"
+              detail="之后切到微信、浏览器、看书都没关系，点会一直留在屏幕两侧"
+            />
+            <Row
+              title="想随手开关，加一个快捷面板磁贴"
+              detail="下拉通知栏点一下即可，不用回到 App 里找按钮"
+            />
+            <Row
+              title="圆点没出现，先查这两项"
+              detail="悬浮窗权限是否被撤销；系统省电策略是否冻结了后台常驻（页面里有入口）"
+            />
+          </Card>
+
+          <Text
+            style={{
+              color: theme.textTertiary,
+              fontSize: t.caption,
+              marginTop: space.xl,
+              textAlign: 'center',
+            }}
+          >
+            v{APP_VERSION} · 原生前台服务 + 系统级悬浮窗 · Android 7.0 以上
+          </Text>
+        </ScrollView>
+      </SafeAreaView>
+    </FadeIn>
   );
 }
 
-interface FeatureCardProps {
-  icon: string;
-  title: string;
-  description: string;
-  buttonLabel: string;
-  onPress: () => void;
-  badge?: React.ReactNode;
-}
+/**
+ * 上次启动的崩溃现场。
+ *
+ * 原生 CrashCapture、JS 错误边界与全局致命错误处理都写同一个偏好键，所以这里一次读出来
+ * 就能覆盖三类崩溃。「点图标就闪退」在没有真机日志时是没法排查的 ——
+ * 让 App 自己把原因显示在首页，用户截一张图就等于交出了 stacktrace。
+ */
+function CrashReportCard(): React.JSX.Element | null {
+  const theme = useTheme();
+  const [crash, setCrash] = useStringPreference(LAST_CRASH_KEY, '');
+  if (!crash) return null;
 
-/** 首页直接显示圆点是否在跑：以前要进二级页才知道当前状态 */
-function RunningBadge() {
-  const { isRunning } = useOverlayServiceContext();
-  if (!isRunning) return null;
   return (
-    <View style={styles.runningBadge}>
-      <View style={styles.runningDot} />
-      <Text style={styles.runningBadgeText}>圆点运行中</Text>
-    </View>
-  );
-}
-
-function FeatureCard({ icon, title, description, buttonLabel, onPress, badge }: FeatureCardProps) {
-  return (
-    <View style={styles.featureCard}>
-      <View style={styles.featureIcon}>
-        <Text style={styles.featureIconText}>{icon}</Text>
-      </View>
-      <Text style={styles.featureTitle}>{title}</Text>
-      {badge ?? null}
-      <Text style={styles.featureDescription}>{description}</Text>
-      <TouchableOpacity
-        style={styles.startButton}
-        onPress={onPress}
-        activeOpacity={0.8}
+    <View
+      style={{
+        backgroundColor: theme.dangerSoft,
+        borderRadius: 16,
+        padding: space.lg,
+        marginBottom: space.md,
+      }}
+    >
+      <Text style={{ color: theme.danger, fontSize: t.control, fontWeight: '800' }}>
+        上次启动发生了崩溃
+      </Text>
+      <ScrollView
+        style={{
+          maxHeight: 150,
+          backgroundColor: theme.cardAlt,
+          borderRadius: 10,
+          padding: space.md,
+          marginTop: space.sm,
+        }}
+        nestedScrollEnabled
       >
-        <Text style={styles.startButtonText}>{buttonLabel}</Text>
-      </TouchableOpacity>
+        <Text
+          style={{
+            color: theme.textSecondary,
+            fontSize: 11,
+            lineHeight: 17,
+            fontFamily: 'monospace',
+          }}
+        >
+          {crash}
+        </Text>
+      </ScrollView>
+      <Text
+        style={{
+          color: theme.textSecondary,
+          fontSize: t.footnote,
+          lineHeight: 19,
+          marginTop: space.sm,
+        }}
+      >
+        把上面这段截图发到 GitHub Issue，就能直接定位原因。
+      </Text>
+      <View style={{ marginTop: space.md }}>
+        <Button label="已知晓，清除提示" variant="soft" onPress={() => setCrash('')} />
+      </View>
     </View>
   );
 }
-
-function InfoRow({ text }: { text: string }) {
-  return (
-    <View style={styles.infoItem}>
-      <Text style={styles.infoBullet}>•</Text>
-      <Text style={styles.infoText}>{text}</Text>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
-  },
-  header: {
-    alignItems: 'center',
-    paddingTop: Platform.OS === 'ios' ? 10 : 40,
-    paddingBottom: 30,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#1E293B',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 15,
-    color: '#64748B',
-  },
-  content: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-  },
-  crashCard: {
-    backgroundColor: '#FEF2F2',
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#FECACA',
-  },
-  crashTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#B91C1C',
-    marginBottom: 10,
-  },
-  crashLog: {
-    maxHeight: 180,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 10,
-  },
-  crashText: {
-    fontSize: 11,
-    lineHeight: 17,
-    color: '#7F1D1D',
-    fontFamily: 'monospace',
-  },
-  crashHint: {
-    fontSize: 12,
-    lineHeight: 18,
-    color: '#991B1B',
-    marginBottom: 12,
-  },
-  crashClear: {
-    backgroundColor: '#B91C1C',
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  crashClearText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  featureCard: {
-    backgroundColor: '#fff',
-    borderRadius: 24,
-    padding: 32,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 3,
-    marginBottom: 20,
-  },
-  featureIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#F1F5F9',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  featureIconText: {
-    fontSize: 40,
-  },
-  featureTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#1E293B',
-    marginBottom: 12,
-  },
-  runningBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'center',
-    backgroundColor: '#DCFCE7',
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginBottom: 12,
-  },
-  runningDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#22C55E',
-    marginRight: 8,
-  },
-  runningBadgeText: {
-    color: '#15803D',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  featureDescription: {
-    fontSize: 15,
-    color: '#64748B',
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 24,
-  },
-  startButton: {
-    backgroundColor: '#6366F1',
-    borderRadius: 30,
-    paddingVertical: 18,
-    paddingHorizontal: 48,
-    shadowColor: '#6366F1',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  startButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  infoCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-  },
-  infoTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1E293B',
-    marginBottom: 12,
-  },
-  infoItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 8,
-  },
-  infoBullet: {
-    fontSize: 14,
-    color: '#6366F1',
-    marginRight: 8,
-    lineHeight: 20,
-  },
-  infoText: {
-    fontSize: 14,
-    color: '#64748B',
-    flex: 1,
-    lineHeight: 20,
-  },
-  footer: {
-    alignItems: 'center',
-    paddingBottom: Platform.OS === 'ios' ? 30 : 20,
-    paddingTop: 20,
-  },
-  footerText: {
-    fontSize: 13,
-    color: '#94A3B8',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  versionText: {
-    fontSize: 11,
-    color: '#CBD5E1',
-  },
-});

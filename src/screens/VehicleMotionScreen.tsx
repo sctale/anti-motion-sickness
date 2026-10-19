@@ -1,37 +1,49 @@
-import React, { useState, useCallback } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  StatusBar,
-  ScrollView,
-  Switch,
-} from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, StatusBar, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useOverlayServiceContext } from '../hooks/OverlayServiceContext';
 import {
   SENSITIVITY,
-  SENSITIVITY_LABELS,
   toSensitivityLevel,
   type SensitivityLevel,
 } from '../native/OverlayNative';
+import {
+  Banner,
+  Button,
+  Card,
+  Chevron,
+  FadeIn,
+  Row,
+  SectionLabel,
+  Segmented,
+  StatusDot,
+  Tap,
+  Toggle,
+} from '../components/ui';
+import { radius, space, type as t, useIsDark, useTheme } from '../theme/tokens';
 
 interface VehicleMotionScreenProps {
   onExit: () => void;
 }
 
-const SENSITIVITY_LEVELS: SensitivityLevel[] = ['low', 'medium', 'high'];
+const SENSITIVITY_OPTIONS: { value: SensitivityLevel; label: string }[] = [
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+];
 
 const SENSITIVITY_HINTS: Record<SensitivityLevel, string> = {
-  low: '只有明显加减速 / 转弯时才有动作',
-  medium: '推荐：日常驾驶幅度',
+  low: '只有明显加减速或转弯时才有动作',
+  medium: '推荐：对应日常驾驶的幅度',
   high: '轻微动作也会跟着动',
 };
 
 export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit }) => {
+  const theme = useTheme();
+  const isDark = useIsDark();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [tileHint, setTileHint] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const {
     hasPermission,
@@ -53,19 +65,31 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
 
   const handleStart = useCallback(async () => {
     setErrorMessage(null);
-    const granted = await checkPermission();
-    if (!granted) {
-      setErrorMessage('需要悬浮窗权限才能在其他应用上显示防晕车圆点');
-      return;
-    }
-    // 通知被隐藏时，用户只能回 App 才能关掉圆点，所以首次启动顺带请求一次通知权限
-    requestNotificationPermission();
+    setBusy(true);
     try {
+      const granted = await checkPermission();
+      if (!granted) {
+        setErrorMessage('需要「显示在其他应用上层」权限，圆点才能盖在别的 App 上');
+        return;
+      }
+      // 通知被隐藏时，用户只能回 App 才能关掉圆点，所以首次启动顺带请求一次通知权限
+      requestNotificationPermission();
       await startService();
     } catch (e) {
-      setErrorMessage('启动服务失败：' + (e as Error).message);
+      setErrorMessage((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   }, [checkPermission, startService, requestNotificationPermission]);
+
+  const handleStop = useCallback(async () => {
+    setBusy(true);
+    try {
+      await stopService();
+    } finally {
+      setBusy(false);
+    }
+  }, [stopService]);
 
   const handleRequestPermission = useCallback(async (): Promise<void> => {
     setErrorMessage(null);
@@ -73,17 +97,15 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
     // 授权页返回后 AppState 会触发重新检查，不需要再用 setTimeout 猜时间
   }, [requestPermission]);
 
-  const handleStop = useCallback(async () => {
-    await stopService();
-  }, [stopService]);
-
+  // 开关与灵敏度走「乐观更新」（在 useOverlayService 里先改本地再落原生）：
+  // 等原生回包才动界面，用户会觉得点没生效
   const handleAutoModeChange = useCallback(
     async (value: boolean): Promise<void> => {
       setErrorMessage(null);
       try {
         await updateSettings({ autoMode: value });
       } catch (e) {
-        setErrorMessage('保存设置失败：' + (e as Error).message);
+        setErrorMessage((e as Error).message);
       }
     },
     [updateSettings]
@@ -95,7 +117,7 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
       try {
         await updateSettings({ sensitivity: SENSITIVITY[level] });
       } catch (e) {
-        setErrorMessage('保存设置失败：' + (e as Error).message);
+        setErrorMessage((e as Error).message);
       }
     },
     [updateSettings]
@@ -122,415 +144,210 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
     }
   }, [openBatterySettings]);
 
-  // 返回不再停服务：圆点的用途就是盖在其他 App 上，
-  // 在 App 内翻页不应该把提示关掉（停止交给「停止」按钮 / 通知栏 / 磁贴）
-  const handleExit = useCallback(() => {
-    onExit();
-  }, [onExit]);
+  // 返回不再停服务：圆点的用途就是盖在其他 App 上，在 App 内翻页不应该把提示关掉
+  const handleExit = useCallback(() => onExit(), [onExit]);
+
+  const level = toSensitivityLevel(settings.sensitivity);
+  const showSystemRows = isSupported && (canRequestAddTile || batteryExempt === false);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
-      <StatusBar
-        barStyle="light-content"
-        backgroundColor="#0F172A"
-        translucent={false}
-      />
+    <FadeIn>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.page }} edges={['top', 'left', 'right', 'bottom']}>
+        <StatusBar
+          barStyle={isDark ? 'light-content' : 'dark-content'}
+          backgroundColor={theme.page}
+          translucent={false}
+        />
 
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleExit} style={styles.backButton}>
-          <Text style={styles.backButtonText}>← 返回</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>🚗 Vehicle Motion</Text>
-        <View style={styles.placeholder} />
-      </View>
-
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.statusCard}>
-          <View style={[styles.statusDot, isRunning && styles.statusDotActive]} />
-          <Text style={styles.statusText}>
-            {/* isRunning 现在代表「圆点真的挂在屏幕上」，说「运行中」会掩盖被冻结的情况 */}
-            {isRunning ? '圆点显示中' : '未显示'}
-          </Text>
+        <View style={{ paddingHorizontal: space.sm, paddingTop: space.xs }}>
+          <Tap
+            onPress={handleExit}
+            accessibilityLabel="返回主页"
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              padding: space.sm,
+              borderRadius: radius.control,
+              alignSelf: 'flex-start',
+            }}
+          >
+            <Chevron direction="left" color={theme.accent} />
+            <Text style={{ color: theme.accent, fontSize: t.control, marginLeft: space.xs + 2 }}>
+              返回
+            </Text>
+          </Tap>
         </View>
 
-        {!isSupported && (
-          <View style={styles.warningCard}>
-            <Text style={styles.warningTitle}>⚠️ 当前平台不支持</Text>
-            <Text style={styles.warningText}>
-              悬浮圆点依赖 Android 的悬浮窗与前台服务，iOS 没有对应能力；若你已在 Android 上，说明该构建未包含原生模块 OverlayModule，请使用完整 Android 构建。
-            </Text>
-          </View>
-        )}
+        <ScrollView
+          contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: space.xxl }}
+          showsVerticalScrollIndicator={false}
+        >
+          <Text
+            style={{
+              color: theme.text,
+              fontSize: t.title,
+              fontWeight: '800',
+              letterSpacing: -0.4,
+              marginTop: space.xs,
+              marginBottom: space.lg,
+            }}
+          >
+            防晕圆点
+          </Text>
 
-        {isSupported && hasPermission === false && (
-          <View style={styles.warningCard}>
-            <Text style={styles.warningTitle}>⚠️ 需要悬浮窗权限</Text>
-            <Text style={styles.warningText}>
-              为了在其他应用上显示防晕车圆点，需要授予悬浮窗权限。
-            </Text>
-            <TouchableOpacity
-              style={styles.permissionButton}
-              onPress={handleRequestPermission}
+          <Card>
+            <Row
+              first
+              title={isRunning ? '圆点正在显示' : '圆点未显示'}
+              detail={
+                !isSupported
+                  ? '当前构建不包含悬浮窗能力（仅 Android 完整构建可用）'
+                  : isRunning
+                    ? '切到其他 App 也不会中断；息屏时自动暂停传感器'
+                    : '上车后点「开始显示」，或下拉快捷面板点磁贴'
+              }
+              accessory={<StatusDot on={isRunning} size={12} />}
+            />
+          </Card>
+
+          {!isSupported ? (
+            <Banner
+              tone="warning"
+              title="这个构建不支持悬浮窗"
+              body="圆点依赖 Android 的悬浮窗与前台服务，iOS 没有对应能力；如果你正在用 Android，说明该包未包含原生模块，请安装完整构建。"
+            />
+          ) : null}
+
+          {isSupported && hasPermission === false ? (
+            <Banner
+              tone="warning"
+              title="需要「显示在其他应用上层」权限"
+              body="没有这个权限，圆点无法盖在微信、浏览器等其他应用上。"
+              action={
+                <Button label="前往系统设置授权" variant="soft" onPress={handleRequestPermission} />
+              }
+            />
+          ) : null}
+
+          {errorMessage ? <Banner tone="danger" title="操作没有成功" body={errorMessage} /> : null}
+
+          {serviceHint ? <Banner tone="info" title="状态与画面不一致" body={serviceHint} /> : null}
+
+          <SectionLabel>显示</SectionLabel>
+          <Card>
+            <View style={{ padding: space.lg }}>
+              <Button
+                label={isRunning ? '停止显示' : '开始显示'}
+                variant={isRunning ? 'danger' : 'primary'}
+                busy={busy}
+                disabled={!isSupported || hasPermission === false}
+                onPress={isRunning ? handleStop : handleStart}
+              />
+            </View>
+            <Row
+              title="自动模式"
+              detail="检测到车辆运动时显示，静止约 10 秒后淡出；运行中也能切换"
+              accessory={
+                <Toggle
+                  value={settings.autoMode}
+                  onChange={handleAutoModeChange}
+                  accessibilityLabel="自动模式"
+                />
+              }
+            />
+            <View
+              style={{
+                paddingHorizontal: space.lg,
+                paddingBottom: space.lg,
+                paddingTop: space.lg,
+                borderTopWidth: 1,
+                borderTopColor: theme.separator,
+              }}
             >
-              <Text style={styles.permissionButtonText}>前往授权</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {errorMessage && (
-          <View style={styles.errorCard}>
-            <Text style={styles.errorText}>{errorMessage}</Text>
-          </View>
-        )}
-
-        <View style={styles.controlsCard}>
-          <Text style={styles.controlsTitle}>控制面板</Text>
-
-          <View style={styles.controlRow}>
-            <View style={styles.controlLabelBlock}>
-              <Text style={styles.controlLabel}>自动模式</Text>
-              <Text style={styles.controlHint}>
-                检测到车辆运动时显示圆点，静止约 10 秒后自动隐藏。运行中也能切换
+              <Text style={{ color: theme.text, fontSize: t.body, fontWeight: '500', marginBottom: space.md }}>
+                灵敏度
+              </Text>
+              <Segmented
+                options={SENSITIVITY_OPTIONS}
+                value={level}
+                onChange={handleSensitivityChange}
+                accessibilityLabel="灵敏度"
+              />
+              <Text
+                style={{
+                  color: theme.textSecondary,
+                  fontSize: t.footnote,
+                  lineHeight: 18,
+                  marginTop: space.md,
+                }}
+              >
+                {SENSITIVITY_HINTS[level]}
               </Text>
             </View>
-            <Switch
-              value={settings.autoMode}
-              onValueChange={handleAutoModeChange}
-              trackColor={{ false: '#334155', true: '#6366F1' }}
-              thumbColor="#fff"
+          </Card>
+
+          {showSystemRows ? (
+            <>
+              <SectionLabel>系统入口</SectionLabel>
+              <Card>
+                {canRequestAddTile ? (
+                  <Row
+                    first
+                    title="添加到快捷设置面板"
+                    detail="下拉通知栏点一下即可开关圆点，不用回到 App"
+                    accessory={<Chevron direction="right" color={theme.textTertiary} />}
+                    onPress={handleAddTile}
+                  />
+                ) : null}
+                {batteryExempt === false ? (
+                  <Row
+                    first={!canRequestAddTile}
+                    title="允许后台常驻"
+                    detail="系统的省电策略会冻结常驻服务，这是圆点「用着用着没了」最常见的原因"
+                    accessory={<Chevron direction="right" color={theme.textTertiary} />}
+                    onPress={handleOpenBatterySettings}
+                  />
+                ) : null}
+              </Card>
+            </>
+          ) : null}
+
+          {tileHint ? <Banner tone="info" title={tileHint} /> : null}
+
+          <SectionLabel>圆点在告诉你什么</SectionLabel>
+          <Card>
+            <Row
+              first
+              title="加速时圆点向下流"
+              detail="刹车时向上流，与车窗外景物的流向一致 —— 眼睛看到的和耳朵感受到的对上了，就不容易晕"
             />
-          </View>
+            <Row
+              title="左转时圆点向右移"
+              detail="右转时向左移；偏航角速度与横向加速度两路合成，缓转与急转的幅度也不同"
+            />
+            <Row
+              title="竖握、平放都能识别"
+              detail="前进方向由手机姿态自适应推断，不依赖手机朝向，也不依赖磁北"
+            />
+            <Row
+              title="只在屏幕两侧活动"
+              detail="左右各 8 个点，不侵入中间的内容区；息屏时自动暂停传感器省电"
+            />
+          </Card>
 
-          <View style={styles.sensitivitySection}>
-            <Text style={styles.controlLabel}>灵敏度</Text>
-            <View style={styles.sensitivityButtons}>
-              {SENSITIVITY_LEVELS.map((level) => {
-                const active = toSensitivityLevel(settings.sensitivity) === level;
-                return (
-                  <TouchableOpacity
-                    key={level}
-                    style={[styles.sensitivityButton, active && styles.sensitivityButtonActive]}
-                    onPress={() => handleSensitivityChange(level)}
-                  >
-                    <Text
-                      style={[
-                        styles.sensitivityButtonText,
-                        active && styles.sensitivityButtonTextActive,
-                      ]}
-                    >
-                      {SENSITIVITY_LABELS[level]}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <Text style={styles.controlHint}>
-              {SENSITIVITY_HINTS[toSensitivityLevel(settings.sensitivity)]}
-            </Text>
-          </View>
-
-          <TouchableOpacity
-            style={[styles.controlButton, isRunning && styles.controlButtonActive]}
-            onPress={isRunning ? handleStop : handleStart}
-            disabled={!isSupported || hasPermission === false}
+          <Text
+            style={{
+              color: theme.textTertiary,
+              fontSize: t.footnote,
+              lineHeight: 19,
+              marginTop: space.lg,
+              paddingHorizontal: space.xs,
+            }}
           >
-            <Text style={styles.controlButtonText}>
-              {isRunning ? '⏹ 停止' : '▶ 启动'}
-            </Text>
-          </TouchableOpacity>
-
-          {/* 服务在跑但圆点不可见：以前这种不一致会被静默吞掉，界面一直显示「运行中」 */}
-          {serviceHint !== null && (
-            <Text style={styles.tileHint}>{serviceHint}</Text>
-          )}
-
-          {isSupported && canRequestAddTile && (
-            <TouchableOpacity style={styles.tileButton} onPress={handleAddTile}>
-              <Text style={styles.tileButtonText}>＋ 添加快捷设置磁贴</Text>
-            </TouchableOpacity>
-          )}
-          {isSupported && batteryExempt === false && (
-            <TouchableOpacity
-              style={styles.tileButton}
-              onPress={handleOpenBatterySettings}
-            >
-              <Text style={styles.tileButtonText}>🔋 允许后台常驻（防止圆点被系统冻结）</Text>
-            </TouchableOpacity>
-          )}
-          {tileHint !== null && (
-            <Text style={styles.tileHint}>{tileHint}</Text>
-          )}
-
-          <Text style={styles.controlHint}>
-            返回或切到其他 App 都不会中断圆点；停止请用上面的按钮、通知栏的「停止」，
-            或下拉快捷设置点磁贴。
+            停止方式：本页的「停止显示」、通知栏的「停止」，或下拉快捷面板的磁贴。在 App 内翻页不会中断圆点。
           </Text>
-        </View>
-
-        <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>工作原理</Text>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoBullet}>•</Text>
-            <Text style={styles.infoText}>
-              旋转矢量融合，圆点左右各 8 个（共 16 个）
-            </Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoBullet}>•</Text>
-            <Text style={styles.infoText}>
-              横向提示：左转圆点右移、右转左移（偏航角速度 + 横向加速度）
-            </Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoBullet}>•</Text>
-            <Text style={styles.infoText}>
-              纵向提示：加速圆点下滑、刹车上滑（同车窗外景物流向）
-            </Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoBullet}>•</Text>
-            <Text style={styles.infoText}>
-              姿态自适应：竖握、平放均能正确识别转向
-            </Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoBullet}>•</Text>
-            <Text style={styles.infoText}>
-              临界阻尼弹簧平滑，圆点始终停留在屏幕两侧
-            </Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoBullet}>•</Text>
-            <Text style={styles.infoText}>覆盖其他 App 显示，息屏自动暂停省电</Text>
-          </View>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+        </ScrollView>
+      </SafeAreaView>
+    </FadeIn>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-  },
-  backButton: {
-    paddingVertical: 8,
-  },
-  backButtonText: {
-    color: '#6366F1',
-    fontSize: 16,
-  },
-  title: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  placeholder: {
-    width: 60,
-  },
-  scrollContent: {
-    padding: 20,
-  },
-  statusCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 16,
-    marginBottom: 16,
-  },
-  statusDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#94A3B8',
-    marginRight: 12,
-  },
-  statusDotActive: {
-    backgroundColor: '#22C55E',
-  },
-  statusText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  warningCard: {
-    backgroundColor: 'rgba(245,158,11,0.15)',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(245,158,11,0.3)',
-  },
-  warningTitle: {
-    color: '#F59E0B',
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  warningText: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 16,
-  },
-  permissionButton: {
-    backgroundColor: '#F59E0B',
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  permissionButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  errorCard: {
-    backgroundColor: 'rgba(239,68,68,0.15)',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.3)',
-  },
-  errorText: {
-    color: '#EF4444',
-    fontSize: 14,
-  },
-  controlsCard: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-  },
-  controlsTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 16,
-  },
-  controlRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  controlLabelBlock: {
-    flex: 1,
-    marginRight: 12,
-  },
-  controlLabel: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  controlHint: {
-    color: 'rgba(255,255,255,0.55)',
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  controlButton: {
-    backgroundColor: '#6366F1',
-    borderRadius: 16,
-    paddingVertical: 18,
-    alignItems: 'center',
-  },
-  controlButtonActive: {
-    backgroundColor: '#EF4444',
-  },
-  controlButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  sensitivitySection: {
-    marginBottom: 16,
-  },
-  sensitivityButtons: {
-    flexDirection: 'row',
-    marginTop: 10,
-    marginBottom: 6,
-  },
-  sensitivityButton: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 12,
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'transparent',
-    marginRight: 8,
-  },
-  sensitivityButtonActive: {
-    backgroundColor: 'rgba(99,102,241,0.25)',
-    borderColor: '#6366F1',
-  },
-  sensitivityButtonText: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  sensitivityButtonTextActive: {
-    color: '#fff',
-  },
-  tileButton: {
-    marginTop: 12,
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  tileButtonText: {
-    color: '#C7D2FE',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  tileHint: {
-    marginTop: 8,
-    color: '#A5B4FC',
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  infoCard: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 16,
-    padding: 20,
-  },
-  infoTitle: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 8,
-  },
-  infoBullet: {
-    color: '#6366F1',
-    fontSize: 14,
-    marginRight: 8,
-    lineHeight: 20,
-  },
-  infoText: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 13,
-    flex: 1,
-    lineHeight: 20,
-  },
-});
-
-export default VehicleMotionScreen;
