@@ -28,9 +28,21 @@ object OverlayGeometry {
     const val RADIUS_MIN_SCALE = 0.9f
     const val RADIUS_MAX_SCALE = 1.25f
 
-    /** 圆点纵向分布范围（屏幕高度比例） */
+    /** 圆点纵向分布范围（屏幕高度比例，竖屏） */
     const val SPAN_START = 0.15f
     const val SPAN_END = 0.85f
+
+    /** 横屏时屏幕高度只有竖屏的三分之一上下，收窄的留白会让 8 个点挤成一坨 */
+    const val SPAN_START_LANDSCAPE = 0.10f
+    const val SPAN_END_LANDSCAPE = 0.90f
+
+    /** 按当前朝向取纵向分布区间（宽 > 高 即横屏） */
+    fun spanFor(widthPx: Float, heightPx: Float): Pair<Float, Float> =
+        if (widthPx > heightPx) {
+            SPAN_START_LANDSCAPE to SPAN_END_LANDSCAPE
+        } else {
+            SPAN_START to SPAN_END
+        }
 
     /**
      * 当前几何下横向实际可走的行程（dp）：
@@ -81,8 +93,9 @@ object OverlayGeometry {
         val edgeInsetPx = EDGE_INSET_DP * density
         val bandMaxPx = BAND_MAX_DP * density
 
-        val topY = heightPx * SPAN_START
-        val bottomY = heightPx * SPAN_END
+        val (spanStart, spanEnd) = spanFor(widthPx, heightPx)
+        val topY = heightPx * spanStart
+        val bottomY = heightPx * spanEnd
         if (bottomY <= topY || edgeInsetPx * 2f >= widthPx) return false
 
         out.topY = topY

@@ -1,6 +1,7 @@
 package com.anonymous.anticarsicknessrn
 
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.graphics.PixelFormat
 import android.os.Build
 import android.view.Gravity
@@ -37,6 +38,18 @@ class OverlayManager(context: Context) {
             PixelFormat.TRANSLUCENT
         )
         layoutParams.gravity = Gravity.TOP or Gravity.START
+        // 本 App 的 Activity 锁竖屏（app.json orientation: portrait），
+        // 悬浮窗若继承这个限制，横屏时窗口仍是竖屏的一条，圆点就落在屏幕中间而不是两侧。
+        // 显式声明跟随传感器旋转，窗口才会随横竖屏重新量尺寸。
+        layoutParams.screenOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // 横屏时刘海/挖孔在短边，不铺到 cutout 后面圆点会被切掉
+            layoutParams.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            layoutParams.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
 
         return try {
             windowManager.addView(view, layoutParams)
