@@ -166,7 +166,7 @@ src/
 
 | 参数 | 值 | 说明 |
 |------|-----|------|
-| 圆点数量 | 16（左右各 8） | 纵向分布 15%~85% 屏高，几何量全在 `OverlayGeometry` |
+| 圆点数量 | 16（左右各 8） | 纵向分布：竖屏 15%~85%、横屏 10%~90%（`OverlayGeometry.spanFor`），几何量全在 `OverlayGeometry` |
 | 边缘带宽度 | ≤ 56dp | 圆点不侵入内容区 |
 | 水平 / 垂直满行程 | ±20dp / ±48dp | 横向受边缘带几何限制，必须 ≤ `OverlayGeometry.MAX_SHIFT_X_DP`（20.375，公式给出）；违反会被断言抓住 |
 | 满行程参考输入 | 偏航 0.55 rad/s / 横向 3.5 m/s² / 纵向 3.0 m/s² | 各自归一到满行程，避免普通驾驶直接顶到钳位 |
@@ -178,6 +178,8 @@ src/
 | 采样率（自适应） | 有运动 GAME(~50-100Hz) / 静止 20s → UI(~66ms) / 静止 120s → NORMAL(~200ms) | `SamplingPolicy`；强度达到 0.08 **或圆点仍在显示**就立刻回 GAME。息屏一律注销传感器 |
 | ↳ 低档位的代价 | 从 LOW 回档到跟手约 0.4~0.6s | 弹簧的 `dt` 被钳在 50ms（数值稳定性需要），200ms 采样时积分被压慢；所以降档只发生在「圆点没在显示」的等待期，行车途中不降 |
 | 窗口类型 | TYPE_APPLICATION_OVERLAY | 系统级悬浮窗，不拦截触摸 |
+| 横屏朝向 | `screenOrientation = SCREEN_ORIENTATION_FULL_SENSOR` + cutout `ALWAYS` | Activity 锁竖屏（`app.json orientation: portrait`），悬浮窗**必须显式声明跟随旋转**，否则横屏时窗口仍是竖屏的一条，圆点落在屏幕中间而不是两侧 |
+| 灵敏度档位 | 低 0.7 / 中 1.0 / 高 1.4 / **极高 1.8** | 只缩放满行程参考输入（红线 7）；范围由 `SettingsStore.SENSITIVITY_MIN/MAX` 钳位，加档位只改这一处 + JS 档位表 |
 
 > 运动学参数定义于 [`native/android/MotionCueEngine.kt`](./native/android/MotionCueEngine.kt) 的 `CueConfig`；
 > 圆点排布定义于 [`native/android/OverlayGeometry.kt`](./native/android/OverlayGeometry.kt)（唯一真源，`OverlayView` 只画不算）；
@@ -192,7 +194,7 @@ src/
 bash tools/verify/run.sh
 ```
 
-覆盖 18 组场景（含 2 项姿态矩阵自检）：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式淡入淡出、重力回退、极端限幅、倾斜姿态下纯重力不泄漏、转弯动态范围（防饱和）、自动模式迟滞、静止降档/运动回档、档位切换不抖动。共 65 项断言。
+覆盖 19 组场景（含 2 项姿态矩阵自检）：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式淡入淡出、重力回退、极端限幅、倾斜姿态下纯重力不泄漏、转弯动态范围（防饱和）、自动模式迟滞、静止降档/运动回档、档位切换不抖动、圆点显示中不降档、灵敏度档位单调（含极高）与横屏排布。共 72 项断言。
 修改 `SensorFusion.kt` / `MotionCueEngine.kt` / `RotationMath.kt` / `SamplingPolicy.kt` / `OverlayGeometry.kt` 后必须全部断言通过。
 
 ### AndroidManifest 关键配置
@@ -500,6 +502,18 @@ $env:GH_TOKEN = "ghp_xxx"
 - **正确做法是在产物上断言，而不是在配置上打日志**：
   `release.ps1` 步骤 7 现在会拿 `aapt dump badging` 的 `application-label` 与期望值比对，
   不一致直接中止发布并打印实际值。图标同理用 `aapt2 dump resources` 解出真实文件来看。
+
+### 磁贴点了没反应 / 状态不变
+
+- `getQsTile()` 与 `tile.updateTile()` **只在 `onStartListening()`～`onStopListening()` 这段窗口里有效**，
+  面板一收就结束。所以「点击后 `postDelayed(600ms)` 再刷一次」在真机上等于没刷：
+  那时 `qsTile` 已是 null，磁贴保持旧状态，用户只会再点一次 —— 这就是「不好用」的根因。
+- 正确做法：点击后**立刻**在监听窗口内写一次预期状态，再调
+  `TileService.requestListeningState(context, ComponentName(...))`（静态，API 24+）请 SystemUI
+  重新进入监听窗口，异步结果由 `onStartListening()` 落回磁贴。
+- 别写 `requestListeningContents()` —— 本机 `android-36/android.jar` 里 `TileService` **没有这个方法**
+  （javap 实测），能用的静态入口只有 `requestListeningState`。
+- 清单里同时声明 `ACTIVE_TILE` 与 `TOGGLEABLE_TILE`（后者 Android 13+，告诉系统这是开关型磁贴）。
 
 ### 点图标就闪退（原生配置与 app.json 漂移）
 

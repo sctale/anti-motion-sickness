@@ -28,6 +28,60 @@ Windows PowerShell 5.1 对无 BOM 的 UTF-8 默认按 ANSI/GBK 解码，
 
 ---
 
+## [0.3.21] - 2026-10-18
+
+针对 Android 16 真机反馈的三件事：磁贴不好用、横屏没贴两边、灵敏度不够。
+
+### 🐛 修复：快捷面板磁贴点了状态不变（Android 16 实测「不好用」的根因）
+
+`getQsTile()` 与 `tile.updateTile()` 只在 `onStartListening()`～`onStopListening()` 这段窗口里有效，
+面板一收就结束。而旧实现靠 `postDelayed(600ms)` 补刷一次反映异步启动结果 ——
+那时 `qsTile` 已经是 null，补刷等于没做，磁贴保持旧状态，用户只会再点一次，
+看起来就是「磁贴坏了」。
+
+- 点击后**立刻**在监听窗口内写入预期状态（乐观）；
+- 再调 `TileService.requestListeningState(context, ComponentName(...))`（静态，API 24+）
+  请 SystemUI 重新进入监听窗口，异步结果回来后由 `onStartListening()` 写入真实状态；
+  延时补刷降级为兜底（面板还开着时仍然有效）。
+- 顺带纠正一个我写错又自己查回来的 API：`requestListeningContents()` **不存在** ——
+  `javap` 本机 `android-36/android.jar` 确认 `TileService` 只有静态的 `requestListeningState`。
+- 失败不再无声：缺权限、系统拒绝进入前台等情况会给 Toast 说明（磁贴路径上 App 不在前台，
+  没有 Toast 用户就什么都不知道）。
+- 清单补 `TOGGLEABLE_TILE`（Android 13+ 开关型磁贴，切换会被无障碍服务朗读），
+  并设置 `tile.stateDescription`（Android 14+）让长按预览说清「点按开始/停止」。
+- `onTileAdded()` 也刷新一次，刚拖出来的磁贴不会停在默认状态。
+
+### 🐛 修复：横屏时圆点落在屏幕中间，而不是两边
+
+Activity 锁竖屏（`app.json orientation: portrait`），悬浮窗继承了这一限制，
+横屏时窗口仍是竖屏的一条，于是圆点贴在中间那条带的两侧，而不是真正的屏幕两边。
+
+- 悬浮窗 `WindowManager.LayoutParams.screenOrientation = SCREEN_ORIENTATION_FULL_SENSOR`，
+  显式跟随屏幕旋转；
+- 同时把 `layoutInDisplayCutoutMode` 设为 `ALWAYS`（Android 11+，旧版本 `SHORT_EDGES`），
+  横屏时挖孔在短边，不铺到 cutout 后面圆点会被切掉；
+- 横屏屏幕高度只有竖屏的三分之一上下，纵向分布从 15%~85% 放宽到 **10%~90%**
+  （`OverlayGeometry.spanFor`），否则 8 个点会挤成一坨。
+
+### ✨ 新增：第四档灵敏度「极高」（1.8）
+
+高灵敏度用户反馈 1.4 仍不够。新增 **极高 = 1.8**（满行程参考输入再除以 1.8，
+即偏航约 0.31 rad/s、横向约 1.9 m/s² 就推满）。
+档位范围改由 `SettingsStore.SENSITIVITY_MIN / SENSITIVITY_MAX` 钳位，
+以后加档位只动这一处 + JS 档位表，不再有两份数字。
+仍然**只缩放参考输入，不放大位移上限**（红线 7），新增断言锁住：
+同一输入下 0.7 < 1.0 < 1.4 < 1.8 位移单调、极高档不越满行程、`maxOffsetXdp` 不随档位变化。
+
+### 🧪 验证
+
+- 算法/几何验证台从 18 组扩到 **19 组 72 断言**，全部通过（新增灵敏度单调与横屏排布 7 项）；
+  `tsc --noEmit` 通过；`compileReleaseKotlin` 通过（第一次失败正是因为上面那个不存在的 API，已修正）；
+  注入守卫、图标一致性、`application-label`、16KB 对齐通过。
+- 真机仍需你确认：磁贴点一下是否立刻变亮并真的开始/停止；横屏时圆点是否贴到屏幕两边；
+  「极高」够不够灵敏（不够我再加档或调满行程参考输入）。
+
+---
+
 ## [0.3.20] - 2026-10-18
 
 ### 🐛 修复：深色主题在 Android 上永远不会生效（v0.3.19 的深色配色是死代码）
