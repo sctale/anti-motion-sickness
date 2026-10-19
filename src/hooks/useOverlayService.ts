@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { AppState, Linking } from 'react-native';
 import {
   DEFAULT_SETTINGS,
@@ -50,6 +50,12 @@ export function useOverlayService(): OverlayServiceHook {
   const [batteryExempt, setBatteryExempt] = useState<boolean | null>(null);
   const [serviceHint, setServiceHint] = useState<string | null>(null);
 
+  /** settings 的镜像：乐观更新失败时要回滚到「改动前」，但闭包里的 settings 可能是旧的 */
+  const settingsRef = useRef<OverlaySettings>(DEFAULT_SETTINGS);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
   const isSupported = OverlayModule !== null;
 
   const checkPermission = useCallback(async (): Promise<boolean> => {
@@ -100,6 +106,10 @@ export function useOverlayService(): OverlayServiceHook {
         setSettings((prev) => ({ ...prev, ...patch }));
         return;
       }
+      // 先改本地：原生回包要跨一次 JNI + SharedPreferences，等它才动界面就是「点了没反应」。
+      // 原生返回后会用真实值覆盖；失败则回滚到改动前，并抛出可读原因。
+      const previous = settingsRef.current;
+      setSettings((current) => ({ ...current, ...patch }));
       try {
         const applied = await OverlayModule.updateSettings(
           patch.autoMode ?? null,
@@ -107,6 +117,7 @@ export function useOverlayService(): OverlayServiceHook {
         );
         setSettings(applied);
       } catch (error) {
+        setSettings(previous);
         throw new Error(describeOverlayError(error));
       }
     },
@@ -116,15 +127,19 @@ export function useOverlayService(): OverlayServiceHook {
   const syncServiceState = useCallback(async (): Promise<void> => {
     if (!OverlayModule) return;
     try {
-      const running = await OverlayModule.isServiceRunning();
+      // 两个查询互不依赖，串行 await 等于把「回到前台」的等待时间翻倍
+      const [running, overlayShown] = await Promise.all([
+        OverlayModule.isServiceRunning(),
+        OverlayModule.isOverlayShown(),
+      ]);
+      const shown = running && overlayShown;
       // 圆点是否真的挂在屏幕上比「服务在跑」更贴近用户所见：
       // 前台服务被 ROM 冻结、或窗口被系统移除时，服务还活着但屏幕上什么都没有，
       // 只查 isServiceRunning 就会一直显示「运行中」，用户只能认为 App 坏了。
-      const shown = running ? await OverlayModule.isOverlayShown() : false;
       setIsRunning(shown);
       setServiceHint(
         running && !shown
-          ? '服务在运行，但圆点没有显示（常被系统省电策略冻结）。可点「启动」重新挂上，或按下方允许后台运行。'
+          ? '服务在运行，但圆点没有显示（常被系统省电策略冻结）。可点「开始显示」重新挂上，或按下方允许后台运行。'
           : null
       );
     } catch {
