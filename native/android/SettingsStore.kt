@@ -23,10 +23,15 @@ object SettingsStore {
     /** 默认开启自动模式（对标 Apple「自动」） */
     const val DEFAULT_AUTO_MODE = true
 
-    /** 灵敏度档位：低 / 中 / 高，作为满行程参考输入的除数 */
+    /** 灵敏度档位：低 / 中 / 高 / 极高，作为满行程参考输入的除数 */
     const val SENSITIVITY_LOW = 0.7f
     const val SENSITIVITY_MEDIUM = 1.0f
     const val SENSITIVITY_HIGH = 1.4f
+    const val SENSITIVITY_VERY_HIGH = 1.8f
+
+    /** 允许范围：读写两侧都按它钳位，加档位只需要改这里 */
+    const val SENSITIVITY_MIN = SENSITIVITY_LOW
+    const val SENSITIVITY_MAX = SENSITIVITY_VERY_HIGH
     const val DEFAULT_SENSITIVITY = SENSITIVITY_MEDIUM
 
     /** 当前设置快照 */
@@ -39,7 +44,7 @@ object SettingsStore {
         val prefs = context.applicationContext
             .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val sensitivity = prefs.getFloat(KEY_SENSITIVITY, DEFAULT_SENSITIVITY)
-            .coerceIn(SENSITIVITY_LOW, SENSITIVITY_HIGH)
+            .coerceIn(SENSITIVITY_MIN, SENSITIVITY_MAX)
         return Settings(
             autoMode = prefs.getBoolean(KEY_AUTO_MODE, DEFAULT_AUTO_MODE),
             sensitivity = sensitivity
@@ -58,7 +63,7 @@ object SettingsStore {
         context.applicationContext
             .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
-            .putFloat(KEY_SENSITIVITY, sensitivity.coerceIn(SENSITIVITY_LOW, SENSITIVITY_HIGH))
+            .putFloat(KEY_SENSITIVITY, sensitivity.coerceIn(SENSITIVITY_MIN, SENSITIVITY_MAX))
             .apply()
     }
 

@@ -107,6 +107,7 @@ export const SENSITIVITY = {
   low: 0.7,
   medium: 1.0,
   high: 1.4,
+  veryHigh: 1.8,
 } as const;
 
 export type SensitivityLevel = keyof typeof SENSITIVITY;
@@ -115,6 +116,7 @@ export const SENSITIVITY_LABELS: Record<SensitivityLevel, string> = {
   low: '低',
   medium: '中',
   high: '高',
+  veryHigh: '极高',
 };
 
 export const DEFAULT_SETTINGS: OverlaySettings = {

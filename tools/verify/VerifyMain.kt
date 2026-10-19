@@ -52,6 +52,7 @@ fun main() {
     scenarioSamplingPolicyNoFlapping()
     scenarioSamplingKeepsAliveWhileVisible()
     scenarioOverlayGeometry()
+    scenarioSensitivityAndLandscape()
 
     println()
     if (failures == 0) {
@@ -544,6 +545,61 @@ private fun scenarioOverlayGeometry() {
         narrow.shiftX <= OverlayGeometry.MAX_SHIFT_X_DP * density + 0.01f)
     check("边缘带不够时行程被压到 0 而不是变负",
         OverlayGeometry.maxShiftX(edgeInsetPx + 1f, edgeInsetPx, bandMaxPx) == 0f)
+}
+
+/**
+ * 场景：灵敏度档位与横屏排布。
+ *
+ * 灵敏度只允许缩放「满行程参考输入」，不允许放大满行程本身（AGENTS 红线 7）；
+ * 同时档位必须单调 —— 加了「极高」档之后，这条比原来更值得钉住。
+ */
+private fun scenarioSensitivityAndLandscape() {
+    println("    场景：灵敏度档位（含极高）与横屏排布")
+    val upright = floatArrayOf(0.70710678f, 0f, 0f)
+    // 一个「不到满行程」的中等输入：横向 1.6 m/s² + 偏航 0.22 rad/s
+    val accel = floatArrayOf(0f, 1.6f, 0f)
+    val yaw = 0.22f
+
+    fun driveAt(sensitivity: Float): Float {
+        val fusion = SensorFusion()
+        val engine = MotionCueEngine(
+            MotionCueEngine.CueConfig().withSensitivity(sensitivity)
+        )
+        val gyroWorld = floatArrayOf(0f, 0f, yaw)
+        val linearDevice = deviceFromWorld(upright, accel)
+        val gyroDevice = deviceFromWorld(upright, gyroWorld)
+        var t = 0L
+        repeat(100) {
+            t += 20
+            engine.update(fusion.update(upright, null, linearDevice, null, gyroDevice), t)
+        }
+        return engine.currentOutput().offsetXdp
+    }
+
+    val low = kotlin.math.abs(driveAt(0.7f))
+    val medium = kotlin.math.abs(driveAt(1.0f))
+    val high = kotlin.math.abs(driveAt(1.4f))
+    val veryHigh = kotlin.math.abs(driveAt(1.8f))
+    check("同一输入下位移随档位单调增加", low < medium && medium < high && high < veryHigh)
+    check("极高档仍未越过横向满行程", veryHigh <= CFG.maxOffsetXdp + 0.01f)
+    check("灵敏度不放大满行程本身（红线 7）",
+        MotionCueEngine.CueConfig().withSensitivity(1.8f).maxOffsetXdp == CFG.maxOffsetXdp &&
+        MotionCueEngine.CueConfig().withSensitivity(1.8f).maxOffsetYdp == CFG.maxOffsetYdp)
+    check("极高档的参考输入仍为正数",
+        MotionCueEngine.CueConfig().withSensitivity(1.8f).yawReferenceRadS > 0f)
+
+    // 横屏：宽 > 高，纵向分布要放宽，否则 8 个点挤成一坨
+    val portrait = OverlayGeometry.spanFor(1080f, 2400f)
+    val landscape = OverlayGeometry.spanFor(2400f, 1080f)
+    check("横屏分布区间比竖屏更宽",
+        landscape.first < portrait.first && landscape.second > portrait.second)
+    val layout = DotLayout()
+    val okLand = OverlayGeometry.compute(2400f, 1080f, 3f, 1f, CFG.maxOffsetXdp, CFG.maxOffsetYdp, layout)
+    val lowest = OverlayGeometry.dotY(OverlayGeometry.DOT_COUNT_PER_SIDE - 1, layout)
+    val highest = OverlayGeometry.dotY(0, layout)
+    check("横屏排布可用且两列仍贴左右边", okLand &&
+        kotlin.math.abs(layout.rightX - layout.leftX - (2400f - 2f * OverlayGeometry.EDGE_INSET_DP * 3f)) < 0.01f)
+    check("横屏走满仍不上下出屏", lowest + layout.radius <= 1080f + 0.01f && highest - layout.radius >= -0.01f)
 }
 
 private fun report(out: MotionCueEngine.CueOutput) {

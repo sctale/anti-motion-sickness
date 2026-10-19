@@ -30,12 +30,14 @@ const SENSITIVITY_OPTIONS: { value: SensitivityLevel; label: string }[] = [
   { value: 'low', label: '低' },
   { value: 'medium', label: '中' },
   { value: 'high', label: '高' },
+  { value: 'veryHigh', label: '极高' },
 ];
 
 const SENSITIVITY_HINTS: Record<SensitivityLevel, string> = {
   low: '只有明显加减速或转弯时才有动作',
   medium: '推荐：对应日常驾驶的幅度',
   high: '轻微动作也会跟着动',
+  veryHigh: '最灵敏：很小的动作就推满，走路拿在手里也会跟着晃',
 };
 
 export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit }) => {
