@@ -28,6 +28,43 @@ Windows PowerShell 5.1 对无 BOM 的 UTF-8 默认按 ANSI/GBK 解码，
 
 ---
 
+## [0.3.20] - 2026-10-18
+
+### 🐛 修复：深色主题在 Android 上永远不会生效（v0.3.19 的深色配色是死代码）
+
+上一轮加了浅/深两套调色板并用 `useColorScheme()` 切换，但 `app.json` 里
+`userInterfaceStyle` 仍是 `"light"`。查了本机安装的 `expo-system-ui` 源码才确认这是致命的：
+它的 `SystemUIReactActivityLifecycleListener` 在 Activity 启动时读取字符串资源
+`expo_system_ui_user_interface_style`，值为 `light` 时执行
+`AppCompatDelegate.setDefaultNightMode(MODE_NIGHT_NO)` —— 也就是**强制熄灭夜间模式**，
+`useColorScheme()` 于是永远返回 `light`，深色那套调色板一行都不会生效。
+（生成的 `android/app/src/main/res/values/strings.xml` 里确实写着 `light`，实测确认。）
+
+改为 `"automatic"`，让夜间模式跟随系统。这条也写进了 README 的 Android 16 适配表，
+避免下次有人为了「先只出浅色」又改回去。
+
+### 📄 README 全面重写（此前从 v0.3.2 起就没跟上）
+
+旧 README 里这些内容是错的或过期的：标题写 v0.3.2；采样率写死 `SENSOR_DELAY_GAME`
+（已是自适应三档）；行程上限引用 `OverlayView.MAX_SHIFT_X_DP`（几何早已搬到
+`OverlayGeometry`，且数值是公式给出的 20.375）；算法验证写「14 场景 31 断言」（现为 18 组 65 断言）；
+组件表与项目结构缺 `SamplingPolicy` / `OverlayGeometry` / `CrashCapture` / `SettingsStore` /
+`native/res/drawable` / `src/theme` / `src/components`；权限清单少了
+`FOREGROUND_SERVICE_SPECIAL_USE` 与 `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`；
+使用步骤里的按钮文案（「▶ 启动」）与新界面对不上。
+
+新版按当前实现逐条核对重写，并补上：崩溃可诊断性、图标三条链路与各自的验证方式、
+本地构建发布全流程与门禁、已知限制（外观不可配、乘车检测仅本页、无 iOS、真机验证依赖用户）。
+标题不再写死版本号，改为指向 Releases 链接，避免再次过期。
+
+### 🧪 验证
+
+- `tsc --noEmit` 通过；算法验证台 18 组 65 断言通过（未触碰算法）。
+- prebuild 后核对生成的 `values/strings.xml`：`expo_system_ui_user_interface_style` = `automatic`。
+- 深色主题在真机上是否按系统切换，仍需你确认（本环境无设备）。
+
+---
+
 ## [0.3.19] - 2026-10-18
 
 ### 🎨 重做：界面从「模板拼的」改成系统级工具 App 的样子
