@@ -97,6 +97,10 @@ src/
 │   ├── usePreference.ts            # 原生 SharedPreferences 偏好 Hook ⭐
 │   ├── useActivityRecognition.ts   # 乘车检测（扣除重力的线性加速度）
 │   └── useVibrationService.ts      # 震动服务
+├── components/
+│   └── ui.tsx                      # 界面基元：Tap / Card / Row / Toggle / Segmented / Button / Banner / FadeIn ⭐
+├── theme/
+│   └── tokens.ts                   # 设计令牌唯一真源（浅/深两套色、间距、圆角、字号、动效）⭐
 ├── screens/
 │   ├── VehicleMotionScreen.tsx     # 主功能屏（自动模式 / 灵敏度 / 添加磁贴）
 │   └── CarDetectionScreen.tsx      # 乘车检测屏（震动偏好 + 乘车联动）
@@ -107,6 +111,19 @@ src/
 **注意**：实际运动处理在 **原生 Kotlin** 层（`OverlayService.kt` / `MotionCueEngine.kt`），JS 层只是服务控制。
 服务状态在 App 根部由 `OverlayServiceProvider` 提供，页面一律用 `useOverlayServiceContext()`，
 不要再各页面各自 `useOverlayService()`（那会产生两份权限/运行状态）。
+
+### 界面规范（v0.3.19 起）
+
+| 规则 | 原因 |
+|------|------|
+| 颜色/间距/圆角/字号/动效时长**只从 `src/theme/tokens.ts` 取** | 之前每个界面各写各的（首页浅色、二级页深色，圆角 10~24，间距 8/12/16/20/32 混用），这是「页面像模板」的直接原因 |
+| 界面一律用 `src/components/ui.tsx` 的基元（`Tap` `Card` `Row` `Toggle` `Segmented` `Button` `Banner` `StatusDot` `Chevron` `FadeIn`） | 裸 `TouchableOpacity` 没有按压反馈、系统 `Switch` 在 Android 上风格不统一、hint/error 各处自摆会叠成一串 |
+| **不用 emoji 当图标**，箭头/状态点用画的（`Chevron` / `StatusDot`） | emoji 是「廉价感」的第一来源，而且各 ROM 字形不统一 |
+| 必须同时支持浅色与深色（`useTheme()` / `useIsDark()`） | 一半使用场景在车内或暗光下 |
+| 会改原生状态的开关一律**乐观更新**（先改界面，失败回滚） | 等 JNI 回包才动界面，用户以为没点上，会重复点 |
+| 耗时操作（启动/停止服务）必须有**忙碌态**并禁用按钮 | 同上，重复点击会叠发多次原生调用 |
+| 动画一律 `Animated` + `useNativeDriver: true`（改布局属性的除外） | 不引新依赖（无 reanimated），且动画跑在 UI 线程不掉帧 |
+
 
 ### 运动提示算法（对标 Apple Vehicle Motion Cues）
 
