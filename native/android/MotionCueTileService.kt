@@ -1,5 +1,6 @@
 package com.anonymous.anticarsicknessrn
 
+import android.content.ComponentName
 import android.content.Intent
 import android.os.Build
 import android.os.Handler
@@ -7,22 +8,36 @@ import android.os.Looper
 import android.provider.Settings
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import android.widget.Toast
 
 /**
  * Quick Settings 磁贴：下拉通知栏一键开关防晕车圆点。
  *
- * 对标 Apple 的控制中心入口与 Google Motion Assist 的 Quick Settings 磁贴 ——
- * 这是 README 对标表里长期标着「⚠️ 待实现」的那一项：
- * 没有磁贴时，用户在车上只能通过「打开 App → 点启动」来关闭圆点，
- * 而圆点本身又盖在整个屏幕上，体验上是锁死的。
+ * 对标 Apple 的控制中心入口与 Google Motion Assist 的磁贴。
  *
- * 点击直接切换服务，不启动界面；缺少悬浮窗权限时才跳回 App 引导授权。
- * 状态在每次磁贴可见（onStartListening）时刷新，这是各版本都支持的稳定做法，
- * 不依赖 API 34 才有的 TileServiceListener。
+ * Android 16 上「不好用」的根因是**刷新时机**：`getQsTile()` 只在
+ * `onStartListening()`～`onStopListening()` 这段窗口里有效（面板一收就结束），
+ * 而服务启动是异步的。旧实现用 `postDelayed(600ms)` 补刷一次，
+ * 那时面板早就收起、`qsTile` 已是 null，补刷等于没做 ——
+ * 于是「点了磁贴，图标不变，再点一次」，看起来就是坏了。
+ *
+ * 现在的做法：
+ * 1. 点击后**立刻**按预期结果改写磁贴状态（此时仍在监听窗口内，有效）；
+ * 2. 用 `TileService.requestListeningState()` 请 SystemUI 重新进入监听窗口，
+ *    异步结果回来后由 `onStartListening()` 写入真实状态；
+ * 3. 失败时用 Toast 给出**具体原因**（权限、系统拒绝进入前台等），不再无声。
  */
 class MotionCueTileService : TileService() {
 
     private val handler = Handler(Looper.getMainLooper())
+
+    /** 点击后到真实状态回来之前，磁贴先按这个走 */
+    private var optimisticActive = false
+
+    override fun onTileAdded() {
+        super.onTileAdded()
+        updateTile()
+    }
 
     override fun onStartListening() {
         super.onStartListening()
@@ -32,13 +47,15 @@ class MotionCueTileService : TileService() {
     override fun onClick() {
         super.onClick()
 
-        if (OverlayService.isRunning) {
+        if (isShowingCues()) {
             OverlayService.stop(this)
+            optimisticActive = false
             updateTile()
             return
         }
 
         if (!Settings.canDrawOverlays(this)) {
+            showToast("需要先允许「显示在其他应用上层」")
             openAppForPermission()
             return
         }
@@ -47,22 +64,58 @@ class MotionCueTileService : TileService() {
         // 不一定被算作用户交互豁免；抛异常时退回「打开 App」而不是让进程崩溃
         try {
             OverlayService.start(this)
-        } catch (e: Exception) {
+        } catch (t: Throwable) {
+            showToast("无法启动：${t.message ?: "未知原因"}")
             openAppForPermission()
             return
         }
-        // 启动是异步的：立刻刷新只能显示「未开启」，稍后再刷一次反映真实状态
+
+        optimisticActive = true
         updateTile()
+        requestStateReconcile()
+    }
+
+    /** 圆点是否真的挂在屏幕上（比 isRunning 更接近用户所见） */
+    private fun isShowingCues(): Boolean =
+        OverlayService.isRunning && OverlayService.overlayShown
+
+    private fun requestStateReconcile() {
+        // 静态 API（API 24+）：请 SystemUI 重新走一次 onStartListening，
+        // 我们就能在那个窗口里把异步启动后的真实状态写回磁贴
+        try {
+            requestListeningState(
+                this,
+                ComponentName(this, MotionCueTileService::class.java)
+            )
+        } catch (t: Throwable) {
+            // 个别 ROM 不响应；下面的延时补刷在面板还开着时仍然有效
+        }
         handler.postDelayed({ updateTile() }, TILE_REFRESH_DELAY_MS)
     }
 
     private fun updateTile() {
         val tile = qsTile ?: return
-        val active = OverlayService.isRunning && OverlayService.overlayShown
+        val active = isShowingCues() || optimisticActive
         tile.state = if (active) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         tile.label = LABEL
         tile.contentDescription = LABEL
-        tile.updateTile()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            tile.stateDescription =
+                if (active) "圆点显示中，点按停止" else "点按开始显示防晕圆点"
+        }
+        try {
+            tile.updateTile()
+        } catch (t: Throwable) {
+            // 监听窗口已结束（面板被收起）时会失败，忽略即可
+        }
+    }
+
+    private fun showToast(text: String) {
+        try {
+            Toast.makeText(this, text, Toast.LENGTH_LONG).show()
+        } catch (t: Throwable) {
+            // 弹不出来也不能让磁贴崩掉
+        }
     }
 
     /** 没有悬浮窗权限时，磁贴无法生效，跳回 App 让用户去授权 */
@@ -104,7 +157,7 @@ class MotionCueTileService : TileService() {
         private const val LABEL = "防晕车提示"
         private const val REQUEST_OPEN_APP = 9001
 
-        /** 点击启动后补刷一次磁贴状态的延时（服务启动是异步的） */
-        private const val TILE_REFRESH_DELAY_MS = 600L
+        /** 兜底补刷（真正的刷新靠 requestListeningState → onStartListening） */
+        private const val TILE_REFRESH_DELAY_MS = 800L
     }
 }

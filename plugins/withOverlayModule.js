@@ -354,10 +354,18 @@ function withQuickSettingsTile(config) {
         },
       ],
       // ACTIVE_TILE：点击磁贴本身即可切换，不必跳进 App
+      // TOGGLEABLE_TILE（Android 13+）：告诉系统这是个开关型磁贴，
+      //   切换时会朗读「已开启/已关闭」并参与无障碍与 A11y 服务的一致性判定
       'meta-data': [
         {
           $: {
             'android:name': 'android.service.quicksettings.ACTIVE_TILE',
+            'android:value': 'true',
+          },
+        },
+        {
+          $: {
+            'android:name': 'android.service.quicksettings.TOGGLEABLE_TILE',
             'android:value': 'true',
           },
         },
