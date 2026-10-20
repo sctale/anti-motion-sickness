@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StatusBar, ScrollView } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { BackHandler, View, Text, StatusBar, ScrollView } from 'react-native';
 import Constants from 'expo-constants';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { OverlayServiceProvider, useOverlayServiceContext } from './src/hooks/OverlayServiceContext';
@@ -48,6 +48,26 @@ export default function App() {
  */
 function RootNavigator() {
   const [screen, setScreen] = useState<Screen>('home');
+
+  /**
+   * 系统返回手势 / 返回键。
+   *
+   * 本项目用 state 手管路由（没有 react-navigation），所以 RN 拿不到任何返回栈：
+   * `BackHandler.android.js` 的行为是「没有任何监听返回 true 就 exitApp()」，
+   * 于是 Android 16 上从边缘一划，整个 App 直接没了 —— 而不是回到主页。
+   * 这里必须自己接一层：不在主页就先回主页并消费掉这次返回，在主页才交还系统退出。
+   *
+   * 依赖 screen 重新注册是有意的：监听器按注册倒序调用，重注册能保证拿到的总是当前路由，
+   * 不必再多一个 ref 与它同步。
+   */
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (screen === 'home') return false;
+      setScreen('home');
+      return true;
+    });
+    return () => subscription.remove();
+  }, [screen]);
 
   if (screen === 'vehicleMotion') {
     return <VehicleMotionScreen onExit={() => setScreen('home')} />;
