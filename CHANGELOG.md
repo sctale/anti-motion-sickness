@@ -28,6 +28,43 @@ Windows PowerShell 5.1 对无 BOM 的 UTF-8 默认按 ANSI/GBK 解码，
 
 ---
 
+## [0.3.22] - 2026-10-18
+
+### 🐛 修复：二级页里从边缘一划，整个 App 直接退出（Android 16）
+
+本项目**没有用导航库**，三个界面是 `App.tsx` 里一个 `screen` state 手管的。
+RN 的返回处理逻辑（`BackHandler.android.js`）是：把 `hardwareBackPress` 发给所有监听，
+**只要没有一个返回 `true`，就调 `exitApp()`**（`invokeDefaultBackPressHandler()` → Activity finish）。
+我们一个监听都没注册，所以系统返回键与 Android 13+ 的边缘手势一律等于「退出 App」，
+而不是「回到主页」—— 用户看到的就是「我想返回，结果 App 没了」。
+
+`app.json` 里 `predictiveBackGestureEnabled: true` 与清单上的
+`android:enableOnBackInvokedCallback="true"` 早就开着（v0.3.x 就有），
+但那只是**允许系统走预测性返回回调**，具体行为仍要应用自己消费事件。
+
+- `RootNavigator` 注册 `BackHandler` 监听：不在主页时 `setScreen('home')` 并返回 `true` 消费掉，
+  在主页才返回 `false` 交还系统正常退出。
+- 监听随 `screen` 重新注册，保证回调里拿到的永远是当前路由（监听器按注册倒序调用，
+  这样不必再维护一个和 state 同步的 ref）。
+- 回主页复用既有的 `FadeIn` 进出场，返回是有过渡的，不是硬切。
+- 返回**不会**停掉圆点：圆点的停止只由页面按钮 / 通知栏 / 磁贴触发（既有约定，写进注释）。
+- 乘车检测页被返回时检测随页面卸载停止 —— 这与界面文案「仅本页打开期间有效」一致。
+
+### 🧹 规范
+
+`AGENTS.md` 的「界面规范」表加一条：**路由用 state 手管就必须自己接 `BackHandler`**，
+并写明 RN 的默认行为，避免以后加页面时又漏掉这一层。
+
+### 🧪 验证
+
+- `tsc --noEmit` 通过；算法/几何验证台 19 组 72 断言通过（未触碰算法）。
+- 依据是本机安装的 RN 源码 `node_modules/react-native/Libraries/Utilities/BackHandler.android.js`
+  （监听全返回假值即 `exitApp()`），不是猜的。
+- **仍需你真机确认**：在「防晕圆点」页和「乘车检测」页从两侧边缘滑动 / 按返回键，
+  应该回到主页；在主页再返回才是退出 App。
+
+---
+
 ## [0.3.21] - 2026-10-18
 
 针对 Android 16 真机反馈的三件事：磁贴不好用、横屏没贴两边、灵敏度不够。

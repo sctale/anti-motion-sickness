@@ -123,6 +123,7 @@ src/
 | 会改原生状态的开关一律**乐观更新**（先改界面，失败回滚） | 等 JNI 回包才动界面，用户以为没点上，会重复点 |
 | 耗时操作（启动/停止服务）必须有**忙碌态**并禁用按钮 | 同上，重复点击会叠发多次原生调用 |
 | 动画一律 `Animated` + `useNativeDriver: true`（改布局属性的除外） | 不引新依赖（无 reanimated），且动画跑在 UI 线程不掉帧 |
+| **路由用 state 手管，就必须自己接 `BackHandler`** | RN 的行为是「没有任何监听返回 true 就 `exitApp()`」（`BackHandler.android.js`）。没有导航库时不接这一层，Android 16 边缘手势一划就整个 App 退出，而不是回主页 |
 
 
 ### 运动提示算法（对标 Apple Vehicle Motion Cues）
