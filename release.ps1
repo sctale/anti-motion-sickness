@@ -339,7 +339,7 @@ if ($BumpType -ne "none") {
 
 # ============== 步骤 3.5: 前置检查（构建前拦住明显 break） ==============
 if (-not $SkipChecks -and -not $UploadOnly -and -not $SkipBuild) {
-    Write-Step "3.5/8 前置检查（tsc + 算法验证台）"
+    Write-Step "3.5/8 前置检查（tsc + 设计系统 + 算法验证台）"
 
     Push-Location $ProjectRoot
     try {
@@ -352,6 +352,27 @@ if (-not $SkipChecks -and -not $UploadOnly -and -not $SkipBuild) {
             exit 1
         }
         Write-Success "tsc --noEmit 通过"
+
+        # 设计系统一致性：首页品牌位的点阵几何必须和桌面图标同源，
+        # 抄一份就会漂 —— 漂了的表现是「图标和 App 里的标志长得不一样」。
+        $markSync = Invoke-NativeCommand -AllowFailure { & node tools/verify/mark-sync.mjs }
+        if ($markSync.ExitCode -ne 0) {
+            Write-Err "点阵母题漂移：`n$($markSync.Output)"
+            exit 1
+        }
+        Write-Success "点阵母题一致（图标 / 首页品牌位同源）"
+
+        # 图标产物新鲜度：母题改过但没重跑 render.mjs，就会拿旧 PNG 出包
+        $mark = Get-Item (Join-Path $ProjectRoot "tools\icons\icon-mark.js")
+        $stale = @("assets\icon.png", "assets\android-icon-foreground.png",
+                   "assets\android-icon-monochrome.png", "native\res\drawable\ic_stat_motion.xml") |
+            Where-Object { -not (Test-Path (Join-Path $ProjectRoot $_)) -or
+                           (Get-Item (Join-Path $ProjectRoot $_)).LastWriteTime -lt $mark.LastWriteTime }
+        if ($stale) {
+            Write-Err "图标产物落后于 tools/icons/icon-mark.js，请先跑 node tools/icons/render.mjs：`n  $($stale -join "`n  ")"
+            exit 1
+        }
+        Write-Success "图标产物与母题同批生成"
 
         # 算法验证台（纯 Kotlin，改过 native/android 后必须通过）
         if (Get-Command bash -ErrorAction SilentlyContinue) {

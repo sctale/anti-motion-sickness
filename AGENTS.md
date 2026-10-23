@@ -121,7 +121,11 @@ src/
 | 规则 | 原因 |
 |------|------|
 | 颜色/间距/圆角/字号/动效时长**只从 `src/theme/tokens.ts` 取** | 之前每个界面各写各的（首页浅色、二级页深色，圆角 10~24，间距 8/12/16/20/32 混用），这是「页面像模板」的直接原因 |
-| 界面一律用 `src/components/ui.tsx` 的基元（`Tap` `Card` `Row` `Toggle` `Segmented` `Button` `Banner` `StatusDot` `Chevron` `FadeIn`） | 裸 `TouchableOpacity` 没有按压反馈、系统 `Switch` 在 Android 上风格不统一、hint/error 各处自摆会叠成一串 |
+| **全站只有一个强调色**（Signal Teal）。「可点」与「正在生效」共用 `accent`，实心按钮用 `button` | 上一版靛蓝 + 绿 + 青三个色互相抢焦点；多一个彩色就多一份噪声 |
+| 改色值必须**在浏览器里量过对比度**再落地（深浅两套 11 组配对最低 ≥4.5:1） | 目测「看着还行」的浅色主题白字按钮实际只有 3.4:1，小字全部不过 AA |
+| 点阵母题几何只在 `tools/icons/icon-mark.js` 定义一次；RN 侧由 `tools/verify/mark-sync.mjs` 逐值比对 | Metro 不能 import `tools/`，`DotMatrixMark.tsx` 只能抄一份 —— 抄就必须有守卫，否则图标和应用里的标志会慢慢长成两个形状 |
+| **预览舱底色锁死为夜色**（`stage` 常量，不随主题翻） | 它模拟的是悬浮在用户屏幕上的白色圆点；跟主题翻成浅底白点就成了空心环，用户在预览里看到的不是他上车会看到的 |
+| 界面一律用 `src/components/ui.tsx` 的基元（`Tap` `Card` `Row` `Toggle` `Segmented` `Button` `Banner` `Pill` `StatusDot` `Chevron` `FadeIn`） | 裸 `TouchableOpacity` 没有按压反馈、系统 `Switch` 在 Android 上风格不统一、hint/error 各处自摆会叠成一串 |
 | **不用 emoji 当图标**，箭头/状态点用画的（`Chevron` / `StatusDot`） | emoji 是「廉价感」的第一来源，而且各 ROM 字形不统一 |
 | 必须同时支持浅色与深色（`useTheme()` / `useIsDark()`） | 一半使用场景在车内或暗光下 |
 | 会改原生状态的开关一律**乐观更新**（先改界面，失败回滚） | 等 JNI 回包才动界面，用户以为没点上，会重复点 |
@@ -422,7 +426,9 @@ git push origin main; git push origin $env:VER
 | 脚本 | 作用 |
 |------|------|
 | `release.ps1` | 一键发布到 GitHub Release（推荐入口） |
-| `tools/icons/render.mjs` | 设计稿即代码：重跑生成 `assets/*.png`（桌面/前景/背景/单色/启动页/favicon）+ `native/res/drawable/ic_stat_motion.xml`（通知栏与磁贴的素描矢量）+ 遮罩/尺寸/通知图标三张预览。`sharp` 已是 devDependency，直接 `node tools/icons/render.mjs` 即可，**不要再用 `--no-save` 装**（会被下次 install 剪掉）。固定种子，重跑逐字节一致 |
+| `tools/icons/icon-mark.js` | **点阵母题的唯一几何**（`iconDotList` / `iconExtent` / `iconSvg`）。无 import、无 export：`render.mjs` 用 `new Function` 求值取函数，网页原型原样 `<script>` 注入 —— 一份定义，两边不可能长得不一样 |
+| `tools/icons/render.mjs` | 设计稿即代码：按母题生成 `assets/*.png`（桌面/前景/背景/单色/启动页/favicon）+ `native/res/drawable/ic_stat_motion.xml`（通知栏与磁贴的单色矢量）+ 遮罩/尺寸/通知图标三张预览。`sharp` 已是 devDependency，直接 `node tools/icons/render.mjs` 即可，**不要再用 `--no-save` 装**（会被下次 install 剪掉）。改完必须重跑，发布脚本会查产物是否比母题旧 |
+| `tools/verify/mark-sync.mjs` | 比对 `DotMatrixMark.tsx` 抄走的 6 项常数与后缘亮度，漂移即失败（已用负例验证过会报）。`release.ps1` 前置检查已接入 |
 | `replace_icons.ps1` | 把 `assets/*.png` 转成各 dpi 的 webp 写入 `mipmap-*/`。每条转换先删旧产物、再校验退出码与文件大小，源 PNG 缺一个就报错退出 —— 不允许「静默转出一半」 |
 
 > 所有脚本都使用 `$PSScriptRoot` 解析路径，可在任意位置调用。
@@ -483,7 +489,7 @@ $env:GH_TOKEN = "ghp_xxx"
 - 原因：`assets/icon.png` 改了但 `android/app/src/main/res/mipmap-*/ic_launcher*.webp` 没更新
 - 解决：运行 `powershell -ExecutionPolicy Bypass -File replace_icons.ps1`（失败会以非零码退出，`release.ps1` 因此中止发布，不再告警继续）
 - **通知栏 / 磁贴图标是另一条链路**：`native/res/drawable/ic_stat_motion.xml`（由 render.mjs 生成）
-  由 Config Plugin 复制进 `android/.../res/drawable/`。桌面换成素描而通知栏仍是模板符号，就是这条没跑；
+  由 Config Plugin 复制进 `android/.../res/drawable/`。桌面图标换过而通知栏/磁贴仍是模板符号，就是这条没跑；
   `release.ps1` 会比对两者 SHA256 是否一致。
 
 ### APK 版本号不对

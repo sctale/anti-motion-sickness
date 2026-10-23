@@ -77,7 +77,7 @@ TYPE_APPLICATION_OVERLAY 窗口
 | `CrashCapture` | 未捕获异常同步落盘，下次启动在首页显示堆栈 |
 | `RotationMath` | 纯数学：旋转矢量→旋转矩阵（与 Android 约定一致） |
 
-`native/res/drawable/ic_stat_motion.xml` 是通知栏与磁贴的素描矢量图标，与桌面图标由同一批生成器产出。
+`native/res/drawable/ic_stat_motion.xml` 是通知栏与磁贴的单色矢量图标，与桌面图标共用同一份母题几何（`tools/icons/icon-mark.js`）。
 
 ### JS 层
 
