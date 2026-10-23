@@ -153,9 +153,10 @@ export const CarDetectionScreen: React.FC<CarDetectionScreenProps> = ({ onExit }
             onPress={onExit}
             accessibilityLabel="返回主页"
             style={{
+              minHeight: 44,
               flexDirection: 'row',
               alignItems: 'center',
-              padding: space.sm,
+              paddingHorizontal: space.md,
               borderRadius: radius.control,
               alignSelf: 'flex-start',
             }}

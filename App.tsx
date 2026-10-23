@@ -9,6 +9,9 @@ import { LAST_CRASH_KEY } from './src/utils/constants';
 import { installGlobalCrashReporter } from './src/utils/globalCrashReporter';
 import { VehicleMotionScreen } from './src/screens/VehicleMotionScreen';
 import { CarDetectionScreen } from './src/screens/CarDetectionScreen';
+import { AboutScreen } from './src/screens/AboutScreen';
+import { OnboardingChecklist } from './src/components/OnboardingChecklist';
+import { BRAND } from './src/theme/brand';
 import {
   Banner,
   Button,
@@ -25,7 +28,7 @@ import { space, type as t, useIsDark, useTheme } from './src/theme/tokens';
 // 致命错误要走全局处理器，趁进程终止前把原因同步落盘。
 installGlobalCrashReporter();
 
-type Screen = 'home' | 'vehicleMotion' | 'carDetection';
+type Screen = 'home' | 'vehicleMotion' | 'carDetection' | 'about';
 
 // 版本号单一数据源：app.json -> expo.version（由 expo-constants 读取）
 const APP_VERSION = Constants.expoConfig?.version ?? '0.0.0';
@@ -77,6 +80,10 @@ function RootNavigator() {
     return <CarDetectionScreen onExit={() => setScreen('home')} />;
   }
 
+  if (screen === 'about') {
+    return <AboutScreen onExit={() => setScreen('home')} />;
+  }
+
   return <Home onOpen={setScreen} />;
 }
 
@@ -107,7 +114,7 @@ function Home({ onOpen }: { onOpen: (s: Screen) => void }): React.JSX.Element {
               marginTop: space.xl,
             }}
           >
-            防晕车助手
+            {BRAND.appName}
           </Text>
           <Text
             style={{
@@ -122,6 +129,8 @@ function Home({ onOpen }: { onOpen: (s: Screen) => void }): React.JSX.Element {
           </Text>
 
           <CrashReportCard />
+
+          <OnboardingChecklist onOpenFeature={() => onOpen('vehicleMotion')} />
 
           {isSupported && hasPermission === false ? (
             <Banner
@@ -142,7 +151,7 @@ function Home({ onOpen }: { onOpen: (s: Screen) => void }): React.JSX.Element {
           <Card>
             <Row
               first
-              title="防晕圆点"
+              title={BRAND.featureName}
               detail="常驻后台运行，覆盖在其他应用之上；息屏自动暂停省电"
               accessory={
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -167,27 +176,16 @@ function Home({ onOpen }: { onOpen: (s: Screen) => void }): React.JSX.Element {
               onPress={() => onOpen('vehicleMotion')}
             />
             <Row
-              title="乘车检测"
+              title={BRAND.detectionName}
               detail="用加速度计判断是否正在乘车，检测期间按节奏震动提醒"
               accessory={<Chevron direction="right" color={theme.textTertiary} />}
               onPress={() => onOpen('carDetection')}
             />
-          </Card>
-
-          <SectionLabel>怎么用</SectionLabel>
-          <Card>
             <Row
-              first
-              title="上车前打开「防晕圆点」→ 开始显示"
-              detail="之后切到微信、浏览器、看书都没关系，点会一直留在屏幕两侧"
-            />
-            <Row
-              title="想随手开关，加一个快捷面板磁贴"
-              detail="下拉通知栏点一下即可，不用回到 App 里找按钮"
-            />
-            <Row
-              title="圆点没出现，先查这两项"
-              detail="悬浮窗权限是否被撤销；系统省电策略是否冻结了后台常驻（页面里有入口）"
+              title={BRAND.aboutName}
+              detail="常见问题、反馈渠道，以及「数据只在本机处理」的说明"
+              accessory={<Chevron direction="right" color={theme.textTertiary} />}
+              onPress={() => onOpen('about')}
             />
           </Card>
 

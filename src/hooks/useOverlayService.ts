@@ -37,6 +37,15 @@ export interface OverlayServiceHook {
    * 一致时为 null。以前这种不一致会被静默吞掉，用户只会认为「App 坏了」。
    */
   serviceHint: string | null;
+  /** 通知是否真的能显示（null = 还没查完）。通知栏的「停止」是少数外部关闭通道之一 */
+  notificationsEnabled: boolean | null;
+  /** 打开本应用的通知设置页 */
+  openNotificationSettings: () => Promise<void>;
+  /**
+   * 首屏的异步状态是否都已经回来。
+   * 没有它时权限/电池/磁贴几行会在数据回来后逐个冒出来，内容跳两次。
+   */
+  ready: boolean;
 }
 
 /** 原生模块缺失时的统一提示（避免「点了没反应」） */
@@ -49,6 +58,8 @@ export function useOverlayService(): OverlayServiceHook {
   const [canRequestAddTile, setCanRequestAddTile] = useState(false);
   const [batteryExempt, setBatteryExempt] = useState<boolean | null>(null);
   const [serviceHint, setServiceHint] = useState<string | null>(null);
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
+  const [ready, setReady] = useState(false);
 
   /** settings 的镜像：乐观更新失败时要回滚到「改动前」，但闭包里的 settings 可能是旧的 */
   const settingsRef = useRef<OverlaySettings>(DEFAULT_SETTINGS);
@@ -147,6 +158,24 @@ export function useOverlayService(): OverlayServiceHook {
     }
   }, []);
 
+  const refreshNotificationsEnabled = useCallback(async (): Promise<void> => {
+    if (!OverlayModule) return;
+    try {
+      setNotificationsEnabled(await OverlayModule.areNotificationsEnabled());
+    } catch {
+      setNotificationsEnabled(null);
+    }
+  }, []);
+
+  const openNotificationSettings = useCallback(async (): Promise<void> => {
+    if (!OverlayModule) return;
+    try {
+      await OverlayModule.openNotificationSettings();
+    } catch (error) {
+      throw new Error(describeOverlayError(error));
+    }
+  }, []);
+
   const refreshBatteryExempt = useCallback(async (): Promise<void> => {
     if (!OverlayModule) return;
     try {
@@ -211,10 +240,13 @@ export function useOverlayService(): OverlayServiceHook {
   }, []);
 
   useEffect(() => {
-    checkPermission();
-    reloadSettings();
-    syncServiceState();
-    refreshBatteryExempt();
+    void Promise.all([
+      checkPermission(),
+      reloadSettings(),
+      syncServiceState(),
+      refreshBatteryExempt(),
+      refreshNotificationsEnabled(),
+    ]).finally(() => setReady(true));
 
     if (OverlayModule) {
       OverlayModule.canRequestAddTile()
@@ -226,10 +258,13 @@ export function useOverlayService(): OverlayServiceHook {
     // 国产 ROM 会静默杀掉前台服务，靠挂载时查一次是不够的。
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
-        checkPermission();
-        syncServiceState();
-        reloadSettings();
-        refreshBatteryExempt();
+        void Promise.all([
+          checkPermission(),
+          syncServiceState(),
+          reloadSettings(),
+          refreshBatteryExempt(),
+          refreshNotificationsEnabled(),
+        ]).finally(() => setReady(true));
       }
     });
 
@@ -237,7 +272,13 @@ export function useOverlayService(): OverlayServiceHook {
     // 圆点的用途就是盖在别的 App 上，用户在 App 内切换页面不应该把提示关掉；
     // 停止只由「停止」按钮、通知栏动作和 Quick Settings 磁贴触发。
     return () => subscription.remove();
-  }, [checkPermission, reloadSettings, syncServiceState, refreshBatteryExempt]);
+  }, [
+    checkPermission,
+    reloadSettings,
+    syncServiceState,
+    refreshBatteryExempt,
+    refreshNotificationsEnabled,
+  ]);
 
   return {
     hasPermission,
@@ -256,5 +297,8 @@ export function useOverlayService(): OverlayServiceHook {
     batteryExempt,
     openBatterySettings,
     serviceHint,
+    notificationsEnabled,
+    openNotificationSettings,
+    ready,
   };
 }

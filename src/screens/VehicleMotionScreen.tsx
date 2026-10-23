@@ -2,8 +2,10 @@ import React, { useCallback, useState } from 'react';
 import { View, Text, StatusBar, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useOverlayServiceContext } from '../hooks/OverlayServiceContext';
+import { PreviewPanel } from '../components/PreviewPanel';
 import {
   SENSITIVITY,
+  SENSITIVITY_LABELS,
   toSensitivityLevel,
   type SensitivityLevel,
 } from '../native/OverlayNative';
@@ -63,6 +65,8 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
     batteryExempt,
     openBatterySettings,
     serviceHint,
+    notificationsEnabled,
+    openNotificationSettings,
   } = useOverlayServiceContext();
 
   const handleStart = useCallback(async () => {
@@ -166,9 +170,10 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
             onPress={handleExit}
             accessibilityLabel="返回主页"
             style={{
+              minHeight: 44,
               flexDirection: 'row',
               alignItems: 'center',
-              padding: space.sm,
+              paddingHorizontal: space.md,
               borderRadius: radius.control,
               alignSelf: 'flex-start',
             }}
@@ -204,13 +209,17 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
               detail={
                 !isSupported
                   ? '当前构建不包含悬浮窗能力（仅 Android 完整构建可用）'
-                  : isRunning
-                    ? '切到其他 App 也不会中断；息屏时自动暂停传感器'
-                    : '上车后点「开始显示」，或下拉快捷面板点磁贴'
+                  : [
+                      settings.autoMode ? '自动模式' : '始终显示',
+                      '灵敏度 ' + SENSITIVITY_LABELS[toSensitivityLevel(settings.sensitivity)],
+                      isRunning ? '切到其他应用也不会中断' : '点「开始显示」后生效',
+                    ].join(' · ')
               }
               accessory={<StatusDot on={isRunning} size={12} />}
             />
           </Card>
+
+          {isSupported ? <PreviewPanel /> : null}
 
           {!isSupported ? (
             <Banner
@@ -227,6 +236,23 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
               body="没有这个权限，圆点无法盖在微信、浏览器等其他应用上。"
               action={
                 <Button label="前往系统设置授权" variant="soft" onPress={handleRequestPermission} />
+              }
+            />
+          ) : null}
+
+          {isSupported && isRunning && notificationsEnabled === false ? (
+            <Banner
+              tone="warning"
+              title="通知被禁用，你只能回到应用里关闭圆点"
+              body="通知栏里的「停止」是最方便的关闭通道；也建议添加快捷面板磁贴。"
+              action={
+                <Button
+                  label="去开启通知"
+                  variant="soft"
+                  onPress={() => {
+                    openNotificationSettings().catch(() => undefined);
+                  }}
+                />
               }
             />
           ) : null}
@@ -305,7 +331,7 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
                   <Row
                     first={!canRequestAddTile}
                     title="允许后台常驻"
-                    detail="系统的省电策略会冻结常驻服务，这是圆点「用着用着没了」最常见的原因"
+                    detail="系统仍可能在息屏或后台时冻结服务，圆点会自己消失；设置为「无限制」后这一行会自动隐藏"
                     accessory={<Chevron direction="right" color={theme.textTertiary} />}
                     onPress={handleOpenBatterySettings}
                   />

@@ -497,18 +497,14 @@ export function StatusDot({ on, size = 10 }: { on: boolean; size?: number }): Re
   const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (!on) {
-      pulse.setValue(0);
-      return;
-    }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: 900, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
+    // 只做一次性淡入，不再常驻循环：一个「防晕」产品自己放一个永远在闪的元素是自我矛盾，
+    // 而且首页与二级页各挂一个循环动画在低配机上是白送的开销。
+    Animated.timing(pulse, {
+      toValue: on ? 1 : 0,
+      duration: on ? motion.toggle : motion.pressOut,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
   }, [on, pulse]);
 
   return (
@@ -527,7 +523,15 @@ export function StatusDot({ on, size = 10 }: { on: boolean; size?: number }): Re
 }
 
 /** 返回箭头：两条旋转的边拼成 chevron，比「←」字符干净 */
-export function Chevron({ direction = 'left', color }: { direction?: 'left' | 'right'; color: string }): React.JSX.Element {
+export function Chevron({
+  direction = 'left',
+  color,
+}: {
+  direction?: 'left' | 'right' | 'down';
+  color: string;
+}): React.JSX.Element {
+  // 三条边各留两条：左 = 返回，右 = 进入 / 展开前，下 = 展开后
+  const rotate = direction === 'left' ? '45deg' : direction === 'right' ? '-135deg' : '-45deg';
   return (
     <View
       style={{
@@ -536,10 +540,7 @@ export function Chevron({ direction = 'left', color }: { direction?: 'left' | 'r
         borderLeftWidth: 2,
         borderBottomWidth: 2,
         borderColor: color,
-        transform: [
-          { rotate: direction === 'left' ? '45deg' : '-135deg' },
-          { translateY: direction === 'left' ? 0 : -1 },
-        ],
+        transform: [{ rotate }, { translateY: direction === 'down' ? -3 : direction === 'left' ? 0 : -1 }],
       }}
     />
   );
