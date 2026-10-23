@@ -47,6 +47,54 @@ export interface OverlayNativeModule {
   /** 通用界面偏好（震动开关、频率等），与设置同一份存储 */
   getStringPref(key: string, fallback: string): Promise<string>;
   setStringPref(key: string, value: string): Promise<boolean>;
+
+  /**
+   * 打开 App 内预览，resolve 本机实际用到的传感器说明。
+   * 预览复用常驻服务同一套融合与引擎（见 native/android/CuePreview.kt），
+   * 所以「预览里看到的就是真机上会发生的」，不是另写的动画。
+   */
+  startPreview(): Promise<string>;
+  stopPreview(): Promise<boolean>;
+  /** 轮询预览结果；面板关闭后不要再调 */
+  getPreviewCue(): Promise<PreviewCue>;
+  /** 圆点排布常量（dp），JS 预览按同一比例画，避免两边各写一套尺寸 */
+  getOverlayGeometry(): Promise<OverlayGeometryInfo>;
+  /** 传感器健康概况 */
+  getSensorHealth(): Promise<SensorHealth>;
+  /** 通知是否真的能显示（通知栏的「停止」是少数外部关闭通道之一） */
+  areNotificationsEnabled(): Promise<boolean>;
+  /** 打开本应用的通知设置页 */
+  openNotificationSettings(): Promise<boolean>;
+}
+
+/** 预览帧：位移单位 dp，两个 0~1 的量分别是运动强度与姿态可信度 */
+export interface PreviewCue {
+  offsetXdp: number;
+  offsetYdp: number;
+  magnitude01: number;
+  /** 1 = 手机放法让方向判断很可靠；接近 0 = 那根轴几乎指向天或地，提示会不可信 */
+  confidence01: number;
+  /** 预览是否已经拿到传感器数据 */
+  active: boolean;
+}
+
+/** 与 native/android/OverlayGeometry.kt 同源 */
+export interface OverlayGeometryInfo {
+  dotCountPerSide: number;
+  dotRadiusDp: number;
+  edgeInsetDp: number;
+  bandMaxDp: number;
+  maxShiftXDp: number;
+  radiusMinScale: number;
+  radiusMaxScale: number;
+}
+
+export interface SensorHealth {
+  /** 例如「旋转矢量 + 陀螺仪 + 线性加速度」 */
+  summary: string;
+  /** 缺旋转矢量或陀螺仪：转向提示会变钝 */
+  degraded: boolean;
+  available: boolean;
 }
 
 /**
@@ -98,6 +146,10 @@ export const OVERLAY_ERRORS = {
   TILE_NOT_FOREGROUND: 'ERR_TILE_NOT_FOREGROUND',
   REQUEST_ADD_TILE: 'ERR_REQUEST_ADD_TILE',
   BATTERY_STATE: 'ERR_BATTERY_STATE',
+  START_PREVIEW: 'ERR_START_PREVIEW',
+  STOP_PREVIEW: 'ERR_STOP_PREVIEW',
+  GET_PREVIEW: 'ERR_GET_PREVIEW',
+  SENSOR_HEALTH: 'ERR_SENSOR_HEALTH',
 } as const;
 
 export type OverlayErrorCode = (typeof OVERLAY_ERRORS)[keyof typeof OVERLAY_ERRORS];
@@ -165,6 +217,10 @@ const ERROR_TEXT: Record<string, string> = {
   [OVERLAY_ERRORS.TILE_NOT_FOREGROUND]: '请在 App 前台时再试一次',
   [OVERLAY_ERRORS.REQUEST_ADD_TILE]: '发起添加磁贴时出错，可在下拉面板中手动拖入',
   [OVERLAY_ERRORS.BATTERY_STATE]: '无法查询后台运行限制状态',
+  [OVERLAY_ERRORS.START_PREVIEW]: '预览打不开，可能是这台设备没有可用的运动传感器',
+  [OVERLAY_ERRORS.STOP_PREVIEW]: '关闭预览时出错，重新进入本页即可',
+  [OVERLAY_ERRORS.GET_PREVIEW]: '读取预览数据失败，请重新打开预览',
+  [OVERLAY_ERRORS.SENSOR_HEALTH]: '查询传感器状态失败',
   [OVERLAY_ERRORS.START_FGS_DENIED]:
     '系统拒绝该服务进入前台（常见于省电策略或通知被禁用），请在系统设置里允许本应用后台运行',
   [OVERLAY_ERRORS.START_PIPELINE_FAILED]:

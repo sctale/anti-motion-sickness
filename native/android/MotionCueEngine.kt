@@ -80,10 +80,18 @@ class MotionCueEngine(
         /** 淡入淡出一透明度（0~1） */
         val alpha: Float,
         /** 位移强度 0~1（可用于微调圆点大小） */
-        val magnitude01: Float
+        val magnitude01: Float,
+        /**
+         * 姿态可信度 0~1：当前用来推断「车头方向」的那根轴，在水平面上的投影有多长。
+         *
+         * 1 = 那根轴基本水平（竖握屏幕朝人 / 平放屏幕朝上），左右提示最可靠；
+         * 接近 0 = 那根轴几乎指向天或地（例如屏幕朝天却按竖握解释），方向不可信。
+         * 预览面板靠它提示用户换个放法，而不是让人对着一排乱飘的点猜原因。
+         */
+        val confidence01: Float = 1f
     ) {
         companion object {
-            val ZERO = CueOutput(0f, 0f, 0f, 0f)
+            val ZERO = CueOutput(0f, 0f, 0f, 0f, 0f)
         }
     }
 
@@ -101,6 +109,7 @@ class MotionCueEngine(
     private var enterCandidateSinceMs: Long = 0L
     private var isMoving: Boolean = false
     private var lastMagnitude01 = 0f
+    private var lastConfidence01 = 1f
 
     companion object {
         private val WORLD_UP = floatArrayOf(0f, 0f, 1f)
@@ -132,6 +141,11 @@ class MotionCueEngine(
 
         val hasForward = RotationMath.magnitude(mergedForward) > 0.1f
         val forward = if (hasForward) mergedForward else null
+
+        // 姿态可信度 = 「当前被当作车头方向的那根轴」在水平面上的投影长度。
+        // 竖握路径用屏幕法线（它本该水平），平放路径用屏幕上边缘（它本该水平）。
+        val axisForConfidence = if (blend < 0.5f) screenNormal else fusion.deviceTop
+        lastConfidence01 = horizontalProjectionStrength(axisForConfidence)
 
         // ---- 2. 车辆坐标系下的加速度分量 ----
         // 姿态退化（车头方向投影到水平面几乎为 0）时直接不输出纵向/横向提示：
@@ -208,6 +222,14 @@ class MotionCueEngine(
         return CueOutput(offsetX, offsetY, alpha, magnitude01)
     }
 
+    /** 一根轴在世界水平面（XY）上的投影长度，0~1；接近 0 说明它指向天或地 */
+    private fun horizontalProjectionStrength(axis: FloatArray): Float {
+        val vertical = kotlin.math.abs(RotationMath.dot(axis, WORLD_UP))
+        val squared = 1f - vertical * vertical
+        if (squared <= 0f) return 0f
+        return kotlin.math.sqrt(squared).coerceIn(0f, 1f)
+    }
+
     fun reset() {
         offsetX = 0f
         offsetY = 0f
@@ -221,7 +243,7 @@ class MotionCueEngine(
         lastMagnitude01 = 0f
     }
 
-    fun currentOutput(): CueOutput = CueOutput(offsetX, offsetY, alpha, lastMagnitude01)
+    fun currentOutput(): CueOutput = CueOutput(offsetX, offsetY, alpha, lastMagnitude01, lastConfidence01)
 
     /** 当前是否处于「车辆运动中」（自动模式的可见性判据，带迟滞） */
     fun isVehicleMoving(): Boolean = isMoving

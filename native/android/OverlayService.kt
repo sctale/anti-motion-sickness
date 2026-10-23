@@ -59,25 +59,13 @@ class OverlayService : Service(), SensorEventListener {
     private var sensorThread: HandlerThread? = null
     private var sensorHandler: Handler? = null
 
-    private var rotationVectorSensor: Sensor? = null
-    private var gyroSensor: Sensor? = null
-    private var linearAccelSensor: Sensor? = null
-    private var accelSensor: Sensor? = null
-    private var gravitySensor: Sensor? = null
-
-    // 传感器原始值（4 槽容纳 Android 旋转矢量的 w 分量；长度单独记录）
-    private val rotationVectorRaw = FloatArray(4)
-    private var rotationVectorLength = 0
-    private val rotationVector3 = FloatArray(3)
-    private val rotationVector4 = FloatArray(4)
-    private val accelValues = FloatArray(3)
-    private var hasAccel = false
-    private val linearAccelValues = FloatArray(3)
-    private var hasLinearAccel = false
-    private val gravityValues = FloatArray(3)
-    private var hasGravity = false
-    private val gyroValues = FloatArray(3)
-    private var hasGyro = false
+    /**
+     * 传感器选型与采样缓存都不在这里自己实现：选型走 [SensorKit]，
+     * 缓存与融合入参走 [MotionInput]，两者与 App 内预览共用同一份代码。
+     * 否则「预览里看着对、真机上不灵」这类差异根本没有可比性。
+     */
+    private lateinit var sensorKit: SensorKit
+    private val input = MotionInput()
 
     private var sensorsRegistered = false
 
@@ -132,7 +120,7 @@ class OverlayService : Service(), SensorEventListener {
             sensorHandler = Handler(thread.looper)
 
             resolveSensors()
-            if (activeSensors().isEmpty()) {
+            if (sensorKit.isEmpty()) {
                 // 连加速度计都没有的机器没法给出任何提示，与其让圆点冻在那里，不如直说
                 Log.e(TAG, "本机没有任何可用的运动传感器，停止服务")
                 markStopped(REASON_NO_SENSORS)
@@ -266,27 +254,11 @@ class OverlayService : Service(), SensorEventListener {
 
     override fun onSensorChanged(event: SensorEvent) {
         when (event.sensor.type) {
-            Sensor.TYPE_ROTATION_VECTOR -> {
-                val n = minOf(event.values.size, rotationVectorRaw.size)
-                System.arraycopy(event.values, 0, rotationVectorRaw, 0, n)
-                rotationVectorLength = n
-            }
-            Sensor.TYPE_LINEAR_ACCELERATION -> {
-                copy3(event.values, linearAccelValues)
-                hasLinearAccel = true
-            }
-            Sensor.TYPE_ACCELEROMETER -> {
-                copy3(event.values, accelValues)
-                hasAccel = true
-            }
-            Sensor.TYPE_GRAVITY -> {
-                copy3(event.values, gravityValues)
-                hasGravity = true
-            }
-            Sensor.TYPE_GYROSCOPE -> {
-                copy3(event.values, gyroValues)
-                hasGyro = true
-            }
+            Sensor.TYPE_ROTATION_VECTOR -> input.onRotationVector(event.values)
+            Sensor.TYPE_LINEAR_ACCELERATION -> input.onLinearAcceleration(event.values)
+            Sensor.TYPE_ACCELEROMETER -> input.onAcceleration(event.values)
+            Sensor.TYPE_GRAVITY -> input.onGravity(event.values)
+            Sensor.TYPE_GYROSCOPE -> input.onGyroscope(event.values)
             else -> return
         }
 
@@ -318,34 +290,13 @@ class OverlayService : Service(), SensorEventListener {
     private fun runPipeline() {
         pipelineScheduled = false
         val now = SystemClock.elapsedRealtime()
-        if (hasAccel || hasLinearAccel) lastPipelineAtMs = now
-
-        val accel = if (hasAccel) accelValues else null
-        val linearAccel = if (hasLinearAccel) linearAccelValues else null
-        if (accel == null && linearAccel == null) return
-
-        val rotationVector = when (rotationVectorLength) {
-            0 -> null
-            3 -> {
-                System.arraycopy(rotationVectorRaw, 0, rotationVector3, 0, 3)
-                rotationVector3
-            }
-            else -> {
-                System.arraycopy(rotationVectorRaw, 0, rotationVector4, 0, 4)
-                rotationVector4
-            }
-        }
+        if (!input.hasMotionData()) return
+        lastPipelineAtMs = now
 
         // 单帧异常不能放出去：这里跑在传感器线程上，抛出即整个进程崩溃。
         // 但也不能像旧版那样无声吞掉每一帧 —— 连续失败到上限就主动收场并留下原因。
         try {
-            val fused = fusion.update(
-                rotationVector = rotationVector,
-                accel = accel,
-                linearAccel = linearAccel,
-                gravity = if (hasGravity) gravityValues else null,
-                gyro = if (hasGyro) gyroValues else null
-            )
+            val fused = input.fuse(fusion) ?: return
             // @Volatile 引用只读一次，保证一帧内用的是同一个引擎实例
             val cue = cueEngine.update(fused, now)
             overlayManager?.update(cue.offsetXdp, cue.offsetYdp, cue.alpha, cue.magnitude01)
@@ -390,11 +341,6 @@ class OverlayService : Service(), SensorEventListener {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun copy3(source: FloatArray, target: FloatArray) {
-        val n = minOf(source.size, 3)
-        System.arraycopy(source, 0, target, 0, n)
-    }
-
     /**
      * 读取并应用用户设置（自动模式 + 灵敏度）。
      * 引擎整体替换，所以替换动作投递到传感器线程：
@@ -417,23 +363,15 @@ class OverlayService : Service(), SensorEventListener {
     }
 
     private fun resolveSensors() {
-        rotationVectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
-        gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
-        linearAccelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
-        if (linearAccelSensor == null) {
-            // 退化路径：加速度计 − 重力（无重力传感器时融合层会做低通估计）
-            accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-            gravitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY)
+        sensorKit = SensorKit(sensorManager)
+        // 界面与日志都要能说出「这台机器实际用了哪些传感器」；缺陀螺仪时转向提示会明显变钝
+        sensorSummary = sensorKit.describe()
+        if (sensorKit.degraded()) {
+            Log.w(TAG, "传感器不齐全，转向提示可能变钝：$sensorSummary")
         }
     }
 
-    private fun activeSensors(): List<Sensor> = listOfNotNull(
-        rotationVectorSensor,
-        gyroSensor,
-        linearAccelSensor,
-        accelSensor,
-        gravitySensor
-    )
+    private fun activeSensors(): List<Sensor> = sensorKit.available()
 
     /** SensorManager 没有「修改采样率」的公开 API，改档位只能注销后按新周期重新注册 */
     private fun samplingRateFor(level: SamplingLevel): Int = when (level) {
@@ -514,6 +452,7 @@ class OverlayService : Service(), SensorEventListener {
             sensorManager.unregisterListener(this)
             fusion.reset()
             cueEngine.reset()
+            input.reset()
             // 重新亮屏后按最高档重新开始计时，避免「息屏前静止了很久」直接落到省电档
             samplingPolicy.reset()
             requestedSamplingLevel = SamplingLevel.HIGH
@@ -545,8 +484,8 @@ class OverlayService : Service(), SensorEventListener {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("防晕车提示运行中")
-            .setContentText("屏幕两侧显示运动提示圆点")
+            .setContentTitle(UiStrings.NOTIFICATION_TITLE)
+            .setContentText(UiStrings.NOTIFICATION_TEXT)
             .setSmallIcon(notificationIconRes())
             .setContentIntent(contentIntent)
             .addAction(0, "停止", stopIntent)
@@ -562,7 +501,7 @@ class OverlayService : Service(), SensorEventListener {
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "防晕车助手",
+                UiStrings.CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 setShowBadge(false)
@@ -639,5 +578,9 @@ class OverlayService : Service(), SensorEventListener {
         /** 最近一次启动失败原因；成功或用户主动停止时为 null */
         @Volatile
         var startReason: String? = null
+
+        /** 本机实际用到的传感器说明（给界面看，例如「旋转矢量 + 陀螺仪 + 线性加速度」） */
+        @Volatile
+        var sensorSummary: String = ""
     }
 }

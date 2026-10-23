@@ -53,6 +53,7 @@ fun main() {
     scenarioSamplingKeepsAliveWhileVisible()
     scenarioOverlayGeometry()
     scenarioSensitivityAndLandscape()
+    scenarioSharedSensorPipeline()
 
     println()
     if (failures == 0) {
@@ -600,6 +601,71 @@ private fun scenarioSensitivityAndLandscape() {
     check("横屏排布可用且两列仍贴左右边", okLand &&
         kotlin.math.abs(layout.rightX - layout.leftX - (2400f - 2f * OverlayGeometry.EDGE_INSET_DP * 3f)) < 0.01f)
     check("横屏走满仍不上下出屏", lowest + layout.radius <= 1080f + 0.01f && highest - layout.radius >= -0.01f)
+}
+
+
+/**
+ * 场景：常驻服务与预览共用的采样缓存层（MotionInput）。
+ *
+ * 它存在的意义就是「预览里看到的必须等于真机上发生的」，
+ * 所以两边的融合入参必须来自同一份代码 —— 这里直接锁住它的行为。
+ */
+private fun scenarioSharedSensorPipeline() {
+    println("    场景：MotionInput 共享采样缓存（预览与服务同一套入参）")
+    val upright = floatArrayOf(0.70710678f, 0f, 0f)
+
+    val bare = MotionInput()
+    check("没有任何加速度数据时不出结果", bare.fuse(SensorFusion()) == null)
+
+    val linear = floatArrayOf(1.4f, -0.6f, 0.2f)
+    // 4 元素形态必须带上真实的 w，否则与 3 元素形态语义不等价（w=0 会被当成 180° 旋转）
+    val rv = floatArrayOf(0.70710678f, 0f, 0f, 0.70710678f)
+    val gyro = floatArrayOf(0.05f, 0.02f, 0.3f)
+
+    val shared = MotionInput()
+    shared.onRotationVector(rv)
+    shared.onLinearAcceleration(linear)
+    shared.onGyroscope(gyro)
+    val viaInput = shared.fuse(SensorFusion())
+
+    val direct = SensorFusion().update(
+        rotationVector = floatArrayOf(rv[0], rv[1], rv[2]),
+        accel = null,
+        linearAccel = linear,
+        gravity = null,
+        gyro = gyro
+    )
+
+    check("走 MotionInput 与直接调用融合层结果一致",
+        viaInput != null &&
+            approx(viaInput!!.horizontalAccel, direct.horizontalAccel) &&
+            kotlin.math.abs(viaInput.yawRate - direct.yawRate) < 0.001f)
+
+    shared.reset()
+    check("reset 后重新要求有数据才出结果", shared.fuse(SensorFusion()) == null)
+
+    // 姿态可信度：竖握与平放都应该是高可信（各自走水平的那根轴）
+    fun confidenceAt(rvPose: FloatArray): Float {
+        val fusion = SensorFusion()
+        val engine = MotionCueEngine()
+        val input = MotionInput()
+        input.onLinearAcceleration(floatArrayOf(0f, 2f, 0f))
+        input.onRotationVector(floatArrayOf(rvPose[0], rvPose[1], rvPose[2]))
+        var t = 0L
+        repeat(60) {
+            t += 20
+            val f = input.fuse(fusion) ?: return@repeat
+            engine.update(f, t)
+        }
+        return engine.currentOutput().confidence01
+    }
+
+    val uprightConfidence = confidenceAt(floatArrayOf(0.70710678f, 0f, 0f))
+    val flatConfidence = confidenceAt(floatArrayOf(0f, 0f, 0f))
+    check("竖握时姿态可信度接近 1", uprightConfidence > 0.9f)
+    check("平放时姿态可信度接近 1", flatConfidence > 0.9f)
+    check("可信度始终落在 0~1",
+        uprightConfidence in 0f..1f && flatConfidence in 0f..1f)
 }
 
 private fun report(out: MotionCueEngine.CueOutput) {

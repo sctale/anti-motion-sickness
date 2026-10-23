@@ -7,6 +7,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
+import android.hardware.SensorManager
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -333,18 +334,149 @@ class OverlayModule(reactContext: ReactApplicationContext) :
         )
     }
 
+    // ===== 预览 / 自检（App 内，不需要上车，也不需要悬浮窗权限）=====
+
+    /**
+     * 打开预览。返回值就是本机实际用到的传感器说明，界面直接显示，
+     * 省得再单独发一次查询。
+     */
+    @ReactMethod
+    fun startPreview(promise: Promise) {
+        try {
+            val preview = CuePreview.get(reactApplicationContext)
+            preview.start()
+            promise.resolve(preview.sensorSummary)
+        } catch (t: Throwable) {
+            promise.reject("ERR_START_PREVIEW", "预览打不开：" + (t.message ?: "未知原因"))
+        }
+    }
+
+    @ReactMethod
+    fun stopPreview(promise: Promise) {
+        try {
+            CuePreview.get(reactApplicationContext).stop()
+            promise.resolve(true)
+        } catch (t: Throwable) {
+            promise.reject("ERR_STOP_PREVIEW", "关闭预览时出错：" + (t.message ?: "未知原因"))
+        }
+    }
+
+    /** 轮询预览结果。刻意用轮询而不是事件流：预览面板只在打开的那几秒存在。 */
+    @ReactMethod
+    fun getPreviewCue(promise: Promise) {
+        val snap = try {
+            CuePreview.get(reactApplicationContext).snapshot()
+        } catch (t: Throwable) {
+            promise.reject("ERR_GET_PREVIEW", "读取预览数据失败：" + (t.message ?: "未知原因"))
+            return
+        }
+        promise.resolve(
+            Arguments.createMap().apply {
+                putDouble("offsetXdp", snap.offsetXdp.toDouble())
+                putDouble("offsetYdp", snap.offsetYdp.toDouble())
+                putDouble("magnitude01", snap.magnitude01.toDouble())
+                putDouble("confidence01", snap.confidence01.toDouble())
+                putBoolean("active", snap.active)
+            }
+        )
+    }
+
+    /**
+     * 圆点排布常量。几何只在 OverlayGeometry 定义一次，JS 侧预览按同一组比例画，
+     * 避免两边各写一套尺寸又对不上。
+     */
+    @ReactMethod
+    fun getOverlayGeometry(promise: Promise) {
+        promise.resolve(
+            Arguments.createMap().apply {
+                putInt("dotCountPerSide", OverlayGeometry.DOT_COUNT_PER_SIDE)
+                putDouble("dotRadiusDp", OverlayGeometry.DOT_RADIUS_DP.toDouble())
+                putDouble("edgeInsetDp", OverlayGeometry.EDGE_INSET_DP.toDouble())
+                putDouble("bandMaxDp", OverlayGeometry.BAND_MAX_DP.toDouble())
+                putDouble("maxShiftXDp", OverlayGeometry.MAX_SHIFT_X_DP.toDouble())
+                putDouble("radiusMinScale", OverlayGeometry.RADIUS_MIN_SCALE.toDouble())
+                putDouble("radiusMaxScale", OverlayGeometry.RADIUS_MAX_SCALE.toDouble())
+            }
+        )
+    }
+
+    /**
+     * 通知是否真的能显示。
+     *
+     * 单独问这一项是因为：通知栏的「停止」是圆点为数不多的外部关闭通道之一。
+     * 用户把通知关掉后，服务还在跑、圆点还盖在屏幕上，却只能回 App 才能关 ——
+     * 之前界面完全不知道这件事。
+     */
+    @ReactMethod
+    fun areNotificationsEnabled(promise: Promise) {
+        try {
+            promise.resolve(
+                androidx.core.app.NotificationManagerCompat.from(reactApplicationContext)
+                    .areNotificationsEnabled()
+            )
+        } catch (t: Throwable) {
+            // 查询失败按「能显示」处理：宁可少提醒，也不要误报把用户吓走
+            promise.resolve(true)
+        }
+    }
+
+    /** 打开系统通知设置页（Android 8+ 可直接到本应用的通知开关） */
+    @ReactMethod
+    fun openNotificationSettings(promise: Promise) {
+        val activity = getCurrentActivity()
+        if (activity == null) {
+            promise.reject("ERR_NO_ACTIVITY", "请回到应用内再试一次")
+            return
+        }
+        try {
+            val intent = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, activity.packageName)
+            activity.startActivity(intent)
+            promise.resolve(true)
+        } catch (t: Throwable) {
+            promise.reject("ERR_OPEN_SETTINGS", "打不开通知设置，请在系统设置里找「防晕车助手 → 通知」")
+        }
+    }
+
+    /** 传感器健康概况：让用户知道这台机器到底用了什么、缺了会怎样 */
+    @ReactMethod
+    fun getSensorHealth(promise: Promise) {
+        try {
+            val manager = reactApplicationContext
+                .getSystemService(Context.SENSOR_SERVICE) as SensorManager
+            val kit = SensorKit(manager)
+            val fromService = OverlayService.sensorSummary
+            promise.resolve(
+                Arguments.createMap().apply {
+                    putString("summary", if (fromService.isNotEmpty()) fromService else kit.describe())
+                    putBoolean("degraded", kit.degraded())
+                    putBoolean("available", !kit.isEmpty())
+                }
+            )
+        } catch (t: Throwable) {
+            promise.reject("ERR_SENSOR_HEALTH", "查询传感器状态失败：" + (t.message ?: "未知原因"))
+        }
+    }
+
+    /**
+     * 失败原因 → 用户可执行的下一步。
+     *
+     * 以前这几条都写成「请反馈机型与系统版本以便定位」，等于把出口指向找开发者；
+     * 上架产品必须让用户自己走完恢复路径，所以统一改成「发生了什么 · 现在怎么办」，
+     * 需要上报的信息放关于页与崩溃详情里，不塞进主文案。
+     */
     private fun reasonText(reason: String): String = when (reason) {
         OverlayService.REASON_FGS_DENIED ->
-            "系统拒绝该服务进入前台（常见于省电策略或通知被禁用），请在系统设置里允许本应用后台运行"
+            "系统不允许本应用在后台常驻，圆点没法显示。\n下一步：在「设置 → 应用 → 防晕车助手 → 电池」选「无限制」，并确认允许发通知。"
         OverlayService.REASON_PIPELINE_FAILED ->
-            "运动提示计算连续失败，服务已自动停止；请反馈机型与系统版本以便定位"
+            "运动计算连续失败，为省电已自动停止。\n下一步：再点一次「开始显示」；若反复出现，请到关于页告诉我们机型。"
         OverlayService.REASON_START_FAILED ->
-            "服务初始化时出错，已自动停止；请反馈机型与系统版本以便定位"
+            "服务启动时出错。\n下一步：再点一次「开始显示」；若仍然失败，重启手机后重试，并到关于页反馈机型。"
         OverlayService.REASON_NO_SENSORS ->
-            "本机没有可用的运动传感器，无法给出防晕提示"
+            "这台设备没有可用的运动传感器，无法给出防晕提示。"
         OverlayService.REASON_SENSOR_RESTART_FAILED ->
-            "调整传感器采样时失败，服务已自动停止；请反馈机型与系统版本以便定位"
-        else -> "服务启动失败：$reason"
+            "调整传感器采样时失败，服务已停止。\n下一步：再点一次「开始显示」通常即可恢复。"
+        else -> "服务启动失败。\n下一步：再点一次「开始显示」；若仍然失败，请到关于页反馈。"
     }
 
     private fun toMap(settings: SettingsStore.Settings): WritableMap =
