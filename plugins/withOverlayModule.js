@@ -338,7 +338,7 @@ function withQuickSettingsTile(config) {
         'android:name': `${packageName}.MotionCueTileService`,
         // 磁贴由系统（TileServer）绑定，必须 exported + 专用权限
         'android:exported': 'true',
-        'android:label': '防晕车提示',
+        'android:label': '防晕圆点',
         'android:icon': '@drawable/ic_stat_motion',
         'android:permission': 'android.permission.BIND_QUICK_SETTINGS_TILE',
       },
@@ -415,11 +415,51 @@ function withLocalBuildWorkarounds(config) {
   });
 }
 
+/**
+ * 本应用用不到、却会被 Expo 模块的清单合并进来的权限（走查时实测产物清单发现的）：
+ *   - ACTIVITY_RECOGNITION：expo-sensors 带的，而乘车检测只用加速度计，也从不运行时申请；
+ *   - READ/WRITE_EXTERNAL_STORAGE：文件模块带的，本应用完全不读写文件。
+ * Google Play 会逐项追问权限用途，「声明了却用不到」是最容易被打回的一项。
+ * 既删掉已写入的节点，也追加 tools:node="remove"，防止库清单在合并时再加回来。
+ */
+const PRUNED_PERMISSIONS = [
+  'android.permission.ACTIVITY_RECOGNITION',
+  'android.permission.READ_EXTERNAL_STORAGE',
+  'android.permission.WRITE_EXTERNAL_STORAGE',
+];
+
+function withPermissionPruning(config) {
+  return withAndroidManifest(config, (cfg) => {
+    const manifest = cfg.modResults.manifest;
+    const root = manifest.$ || (manifest.$ = {});
+    if (!root['xmlns:tools']) {
+      root['xmlns:tools'] = 'http://schemas.android.com/tools';
+    }
+
+    const declared = Array.isArray(manifest['uses-permission'])
+      ? manifest['uses-permission']
+      : [];
+    const kept = declared.filter(
+      (item) => !PRUNED_PERMISSIONS.includes(item && item.$ && item.$['android:name'])
+    );
+    const removals = PRUNED_PERMISSIONS.map((name) => {
+      const attrs = {};
+      attrs['android:name'] = name;
+      attrs['tools:node'] = 'remove';
+      return { $: attrs };
+    });
+
+    manifest['uses-permission'] = kept.concat(removals);
+    return cfg;
+  });
+}
+
 module.exports = function withOverlayModule(config) {
   config = withOverlayKotlinSources(config);
   config = withOverlayService(config);
   config = withQuickSettingsTile(config);
   config = withOverlayPackage(config);
   config = withLocalBuildWorkarounds(config);
+  config = withPermissionPruning(config);
   return config;
 };

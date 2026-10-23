@@ -154,7 +154,7 @@ class MotionCueTileService : TileService() {
     }
 
     companion object {
-        private const val LABEL = "防晕车提示"
+        private const val LABEL = UiStrings.TILE_LABEL
         private const val REQUEST_OPEN_APP = 9001
 
         /** 兜底补刷（真正的刷新靠 requestListeningState → onStartListening） */
