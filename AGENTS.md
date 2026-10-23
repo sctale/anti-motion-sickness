@@ -74,6 +74,10 @@ native/android/
 ├── MotionCueEngine.kt       # 姿态自适应映射、死区、临界阻尼弹簧、迟滞、灵敏度 ⭐
 ├── SamplingPolicy.kt        # 静止降档 / 运动回档的采样强度策略（纯逻辑，可在 JVM 验证）⭐
 ├── OverlayGeometry.kt       # 边缘带排布的纯几何：行程、钳位、列位置（不变量由断言守住）⭐
+├── MotionInput.kt           # 多路传感器原始值 → 融合入参（纯 Kotlin，服务与预览共用）⭐
+├── SensorKit.kt             # 传感器选型与回退（唯一真源，含给界面看的传感器说明）⭐
+├── CuePreview.kt            # App 内预览 / 自检数据源（复用同一套融合与引擎）⭐
+├── UiStrings.kt             # 用户可见名称唯一真源（磁贴标签 / 通知标题 / 通知渠道）⭐
 └── RotationMath.kt          # 旋转矢量 → 旋转矩阵（纯数学，与 Android 约定一致）
 
 # prebuild 后会被注入到：
@@ -123,6 +127,8 @@ src/
 | 会改原生状态的开关一律**乐观更新**（先改界面，失败回滚） | 等 JNI 回包才动界面，用户以为没点上，会重复点 |
 | 耗时操作（启动/停止服务）必须有**忙碌态**并禁用按钮 | 同上，重复点击会叠发多次原生调用 |
 | 动画一律 `Animated` + `useNativeDriver: true`（改布局属性的除外） | 不引新依赖（无 reanimated），且动画跑在 UI 线程不掉帧 |
+| **预览必须复用原生同一套融合与引擎**（`CuePreview` + `MotionInput`），排布常量经 `getOverlayGeometry` 下发 | 在 JS 另写一套「看起来像」的动画，就会出现「预览很好、真机不灵」且无从对照 |
+| 用户可见名称只在 `native/android/UiStrings.kt` 与 `src/theme/brand.ts` 定义 | 一个功能四个名字时，用户在通知栏看到的名字在应用里找不到入口 |
 | **路由用 state 手管，就必须自己接 `BackHandler`** | RN 的行为是「没有任何监听返回 true 就 `exitApp()`」（`BackHandler.android.js`）。没有导航库时不接这一层，Android 16 边缘手势一划就整个 App 退出，而不是回主页 |
 
 
@@ -195,8 +201,8 @@ src/
 bash tools/verify/run.sh
 ```
 
-覆盖 19 组场景（含 2 项姿态矩阵自检）：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式淡入淡出、重力回退、极端限幅、倾斜姿态下纯重力不泄漏、转弯动态范围（防饱和）、自动模式迟滞、静止降档/运动回档、档位切换不抖动、圆点显示中不降档、灵敏度档位单调（含极高）与横屏排布。共 72 项断言。
-修改 `SensorFusion.kt` / `MotionCueEngine.kt` / `RotationMath.kt` / `SamplingPolicy.kt` / `OverlayGeometry.kt` 后必须全部断言通过。
+覆盖 20 组场景（含 2 项姿态矩阵自检）：竖握/平放 × 加速/刹车/左转/右转、车头朝任意朝向、噪声抑制、自动模式淡入淡出、重力回退、极端限幅、倾斜姿态下纯重力不泄漏、转弯动态范围（防饱和）、自动模式迟滞、静止降档/运动回档、档位切换不抖动、圆点显示中不降档、灵敏度档位单调（含极高）与横屏排布、MotionInput 共享采样缓存与姿态可信度。共 78 项断言。
+修改 `SensorFusion.kt` / `MotionCueEngine.kt` / `RotationMath.kt` / `SamplingPolicy.kt` / `OverlayGeometry.kt` / `MotionInput.kt` 后必须全部断言通过。
 
 ### AndroidManifest 关键配置
 
@@ -642,7 +648,7 @@ tsconfig.json              # TypeScript 配置
 index.ts                   # 入口
 App.tsx                    # 主组件
 src/                       # 所有 RN 代码
-native/android/            # 原生 Kotlin 源码（13 个文件，必须入库）⭐
+native/android/            # 原生 Kotlin 源码（17 个文件，必须入库）⭐
 plugins/                   # Config Plugin（prebuild 注入原生层）⭐
 tools/verify/              # 算法验证台（JVM 运行，无需真机）
 assets/                    # 图标资源（源文件由 tools/icons/render.mjs 生成）
