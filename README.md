@@ -58,7 +58,7 @@ OverlayManager → OverlayView（Canvas 绘制，几何量在 OverlayGeometry）
 TYPE_APPLICATION_OVERLAY 窗口
 ```
 
-### 原生组件（`native/android/`，共 13 个 Kotlin 文件）
+### 原生组件（`native/android/`，共 17 个 Kotlin 文件）
 
 | 组件 | 职责 |
 |------|------|
@@ -87,8 +87,9 @@ TYPE_APPLICATION_OVERLAY 窗口
 | `src/hooks/useOverlayService.ts` | 权限 / 启停 / 设置 / 状态同步；**乐观更新**与真实状态回读 |
 | `src/hooks/OverlayServiceContext.tsx` | 服务状态单例上下文（跨页共享，避免两份状态） |
 | `src/hooks/useActivityRecognition.ts` / `useVibrationService.ts` / `usePreference.ts` | 乘车检测、震动反馈、原生偏好读写 |
-| `src/theme/tokens.ts` | 设计令牌唯一真源：浅/深两套调色板、间距、圆角、字号、动效时长 |
-| `src/components/ui.tsx` | 界面基元：`Tap` `Card` `Row` `Toggle` `Segmented` `Button` `Banner` `StatusDot` `Chevron` `FadeIn`（全部 `Animated` + `useNativeDriver`，不引额外动画库） |
+| `src/theme/tokens.ts` | 设计令牌唯一真源：浅/深两套调色板（**只有一个强调色**，配对对比度在浏览器里量过 AA）、间距、圆角、字号 + 行高、三档动效时长；`stage` 常量锁死预览舱为夜色 |
+| `src/components/ui.tsx` | 界面基元：`Tap` `Card` `Row` `Toggle` `Segmented` `Button` `Banner` `Pill` `StatusDot` `Chevron` `FadeIn`（全部 `Animated` + `useNativeDriver`，不引额外动画库） |
+| `src/components/PreviewPanel.tsx` / `DotMatrixMark.tsx` | 实时预览舱（复用原生同一套融合与引擎）/ 点阵品牌位（静态，与桌面图标同一份几何） |
 | `src/components/ErrorBoundary.tsx` / `src/utils/globalCrashReporter.ts` | 渲染期错误边界 + 致命错误落盘（边界接不住的那一类） |
 
 ---
@@ -130,6 +131,15 @@ bash tools/verify/run.sh
 
 `kotlinc` 会自动查找（PATH → `KOTLIN_HOME` → Android Studio 自带的那份）。
 改 `SensorFusion` / `MotionCueEngine` / `RotationMath` / `SamplingPolicy` / `OverlayGeometry` 后必须全绿。
+
+设计层同样有不需要真机的检查：
+
+```bash
+node tools/verify/mark-sync.mjs   # 首页品牌位与桌面图标同一份点阵几何；启动屏底色 = 首页 page 色
+node tools/icons/render.mjs       # 按母题重出 assets/*.png、通知栏矢量与三张尺寸预览图
+```
+
+两条都已挂在 `release.ps1` 的前置检查里 —— 改了母题却拿旧图出包，会在构建开始前就被拦下。
 
 ---
 
