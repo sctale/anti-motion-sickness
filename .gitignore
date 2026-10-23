@@ -98,3 +98,4 @@ release_notes_*.md
 
 # 产品设计套件（/启发评估 等）的链路上下文与报告，属工作产物不入库
 spark-output/
+.release-notes.md

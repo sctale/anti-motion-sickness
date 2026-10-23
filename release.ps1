@@ -165,9 +165,15 @@ function Get-ChangelogSection {
     if (-not (Test-Path $Path)) { return $null }
     $raw = Get-Content $Path -Raw -Encoding UTF8
     $escaped = [regex]::Escape($Version)
-    $match = [regex]::Match($raw, "(?ms)^\s*## \[$escaped\].*?(?=^\s*## \[|\z)")
-    if (-not $match.Success) { return $null }
-    return $match.Value.Trim()
+    # 取「内容最多」的那一节，而不是第一个：步骤 2 会在文件顶部插一条
+    # `## [x] - 待补充` 占位，若作者已经手写过同版本小节，两条会并存，
+    # 按顺序取就会把占位当正文发出去（v0.5.0 实测踩到，Release 正文成了「- 待补充」）。
+    $best = $null
+    foreach ($m in [regex]::Matches($raw, "(?ms)^\s*## \[$escaped\].*?(?=^\s*## \[|\z)")) {
+        if ($null -eq $best -or $m.Value.Length -gt $best.Value.Length) { $best = $m }
+    }
+    if ($null -eq $best) { return $null }
+    return $best.Value.Trim()
 }
 
 function Get-RepoOwner {
@@ -303,16 +309,22 @@ if ($BumpType -ne "none") {
     if (Test-Path $changelogPath) {
         $cl = Get-Content $changelogPath -Raw -Encoding UTF8
         $today = Get-Date -Format "yyyy-MM-dd"
-        $newEntry = @"
+        if ($cl -match "(?m)^\s*## \[$([regex]::Escape($newVersion))\]") {
+            # 作者已经手写过这一节 —— 再插一条占位就会出现两个同名小节，
+            # 正文提取会挑到那条空的（v0.5.0 实测踩到）
+            Write-Success "CHANGELOG.md 已有 [$newVersion] 小节，不插占位"
+        } else {
+            $newEntry = @"
 
 ## [$newVersion] - $today
 
 - 待补充
 
 "@
-        $cl = $cl -replace "(?s)(# 更新日志[^\n]*\n+)", "`$1$newEntry"
-        Write-Utf8NoBom -Path $changelogPath -Content $cl
-        Write-Success "CHANGELOG.md 已添加 [$newVersion] 占位条目"
+            $cl = $cl -replace "(?s)(# 更新日志[^\n]*\n+)", "`$1$newEntry"
+            Write-Utf8NoBom -Path $changelogPath -Content $cl
+            Write-Success "CHANGELOG.md 已添加 [$newVersion] 占位条目"
+        }
     }
 
     Write-Success "版本号升级: $currentVersion -> $newVersion"
