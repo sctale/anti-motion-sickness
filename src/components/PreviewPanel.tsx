@@ -8,7 +8,7 @@ import {
   type SensorHealth,
 } from '../native/OverlayNative';
 import { Banner, Card, SectionLabel, Tap } from './ui';
-import { radius, space, type as t, useTheme } from '../theme/tokens';
+import { leading, radius, space, stage, type as t, useTheme } from '../theme/tokens';
 
 /**
  * 预览 / 自检面板。
@@ -27,8 +27,11 @@ const POLL_INTERVAL_MS = 60;
 /** 示意用的标称屏宽（dp）：预览是示意图，按 360dp 折算比例即可 */
 const NOMINAL_WIDTH_DP = 360;
 
-const STAGE_WIDTH = 132;
-const STAGE_HEIGHT = 236;
+const STAGE_WIDTH = 150;
+const STAGE_HEIGHT = 262;
+
+/** 舱体背景的网格：静态几十条线，比引一个渐变依赖划算 */
+const GRID_CELL = 26;
 
 /** 低于这个可信度就提示换个放法：此时左右提示最容易反直觉 */
 const LOW_CONFIDENCE = 0.4;
@@ -134,134 +137,215 @@ export function PreviewPanel(): React.JSX.Element | null {
   return (
     <>
       <SectionLabel>预览 · 自检</SectionLabel>
-      <Card>
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            padding: space.lg,
-          }}
-        >
-          {/* 手机示意框 */}
-          <View
-            style={{
-              width: STAGE_WIDTH,
-              height: STAGE_HEIGHT,
-              borderRadius: 18,
-              borderWidth: 2,
-              borderColor: theme.separator,
-              backgroundColor: theme.cardAlt,
-              overflow: 'hidden',
-              marginRight: space.lg,
-            }}
-          >
-            {[0, 1].map((side) =>
-              Array.from({ length: dotCount }).map((_, i) => {
-                const baseY = STAGE_HEIGHT * (0.15 + (0.7 * i) / Math.max(1, dotCount - 1));
-                const x =
-                  side === 0
-                    ? edgeInset + shiftX
-                    : STAGE_WIDTH - edgeInset + shiftX;
-                return (
-                  <View
-                    key={`${side}-${i}`}
-                    style={{
-                      position: 'absolute',
-                      left: x - dotRadius / 2,
-                      top: baseY + shiftY - dotRadius / 2,
-                      width: dotRadius,
-                      height: dotRadius,
-                      borderRadius: dotRadius / 2,
-                      backgroundColor: '#FFFFFF',
-                      borderColor: 'rgba(0,0,0,0.45)',
-                      borderWidth: 1,
-                      opacity: dotAlpha,
-                    }}
-                  />
-                );
-              })
-            )}
-          </View>
-
+      {/* 舱体：外层跟着主题走，只有中间那块「屏幕」锁死成夜色 ——
+          它模拟的是悬浮在用户屏幕上的圆点，跟着主题翻成浅底白点就成了空心环 */}
+      <Card style={{ borderRadius: radius.hero }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', padding: space.lg }}>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.text, fontSize: t.control, fontWeight: '600' }}>
+            <Text style={{ color: theme.text, fontSize: t.body, fontWeight: '700' }}>
               摇一摇手机
             </Text>
             <Text
               style={{
                 color: theme.textSecondary,
                 fontSize: t.footnote,
-                lineHeight: 19,
+                lineHeight: leading.footnote,
                 marginTop: space.xs + 2,
               }}
             >
-              右侧的点应该跟着动 —— 不用上车就能确认它在工作。点随转向左右移、随加减速上下流。
-            </Text>
-            <Text
-              style={{
-                color: theme.textTertiary,
-                fontSize: t.caption,
-                marginTop: space.md,
-                lineHeight: 17,
-              }}
-            >
-              {health ? `传感器：${health.summary}` : '传感器：读取中'}
-            </Text>
-            <Text
-              style={{
-                color: confidence < LOW_CONFIDENCE ? theme.warning : theme.textTertiary,
-                fontSize: t.caption,
-                marginTop: space.xs,
-              }}
-            >
-              {cue?.active
-                ? `姿态可信度 ${Math.round(confidence * 100)}%`
-                : '等待传感器数据…'}
+              不用上车就能确认它在工作：点随转向左右移、随加减速上下流。
             </Text>
           </View>
         </View>
 
-        {health?.degraded ? (
-          <Banner
-            tone="warning"
-            title="这台设备缺少陀螺仪或旋转矢量"
-            body={health.summary + '。转向提示会比预期迟钝，加速/刹车的上下流动仍正常。'}
-          />
-        ) : null}
+        <View style={{ alignItems: 'center', paddingBottom: space.xl, paddingHorizontal: space.lg }}>
+          <View style={{ width: STAGE_WIDTH + 40, height: STAGE_HEIGHT + 24 }}>
+            {/* 网格底纹：给舱体一点纵深，4% 透明度，静态不重绘 */}
+            <View
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top: 0,
+                bottom: 0,
+                opacity: 0.9,
+              }}
+            >
+              {Array.from({ length: Math.floor((STAGE_WIDTH + 40) / GRID_CELL) + 1 }).map((_, i) => (
+                <View
+                  key={`v${i}`}
+                  style={{
+                    position: 'absolute',
+                    left: i * GRID_CELL,
+                    top: 0,
+                    bottom: 0,
+                    width: 1,
+                    backgroundColor: theme.grid,
+                  }}
+                />
+              ))}
+              {Array.from({ length: Math.floor((STAGE_HEIGHT + 24) / GRID_CELL) + 1 }).map((_, i) => (
+                <View
+                  key={`h${i}`}
+                  style={{
+                    position: 'absolute',
+                    top: i * GRID_CELL,
+                    left: 0,
+                    right: 0,
+                    height: 1,
+                    backgroundColor: theme.grid,
+                  }}
+                />
+              ))}
+            </View>
 
-        {cue && cue.active && confidence < LOW_CONFIDENCE ? (
-          <Banner
-            tone="warning"
-            title="手机放法让方向判断不可靠"
-            body="把手机竖起来、屏幕朝向自己，或平放在腿上（屏幕朝上）。现在这个角度，左右提示可能不明显或反向。"
-          />
-        ) : null}
+            {/* 手机示意框 */}
+            <View
+              style={{
+                position: 'absolute',
+                left: 20,
+                top: 12,
+                width: STAGE_WIDTH,
+                height: STAGE_HEIGHT,
+                borderRadius: 22,
+                borderWidth: 1.6,
+                borderColor: stage.frame,
+                backgroundColor: stage.canvas,
+                overflow: 'hidden',
+              }}
+            >
+              {[0, 1].map((side) =>
+                Array.from({ length: dotCount }).map((_, i) => {
+                  const baseY = STAGE_HEIGHT * (0.15 + (0.7 * i) / Math.max(1, dotCount - 1));
+                  const x =
+                    side === 0
+                      ? edgeInset + shiftX
+                      : STAGE_WIDTH - edgeInset + shiftX;
+                  return (
+                    <View
+                      key={`${side}-${i}`}
+                      style={{
+                        position: 'absolute',
+                        left: x - dotRadius / 2,
+                        top: baseY + shiftY - dotRadius / 2,
+                        width: dotRadius,
+                        height: dotRadius,
+                        borderRadius: dotRadius / 2,
+                        backgroundColor: stage.dot,
+                        borderColor: stage.dotStroke,
+                        borderWidth: 1,
+                        opacity: dotAlpha,
+                      }}
+                    />
+                  );
+                })
+              )}
+            </View>
+          </View>
+        </View>
 
-        {error ? (
-          <Banner
-            tone="danger"
-            title="预览不可用"
-            body={error}
-            action={
-              <Tap
-                onPress={() => void start()}
-                accessibilityLabel="重试预览"
-                style={{
-                  height: 40,
-                  borderRadius: radius.control,
-                  backgroundColor: theme.accentSoft,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Text style={{ color: theme.onAccentSoft, fontSize: t.control, fontWeight: '700' }}>
-                  重试
-                </Text>
-              </Tap>
-            }
-          />
-        ) : null}
+        {/* 读数条：把「用到了什么传感器」「现在的姿态能不能信」这两件事摆成一行 */}
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'flex-end',
+            borderTopWidth: 1,
+            borderTopColor: theme.separator,
+            paddingHorizontal: space.xl,
+            paddingVertical: space.lg,
+          }}
+        >
+          <View style={{ flex: 1, paddingRight: space.md }}>
+            <Text
+              style={{
+                color: theme.textTertiary,
+                fontSize: t.caption,
+                fontWeight: '700',
+                letterSpacing: 0.6,
+                textTransform: 'uppercase',
+              }}
+            >
+              传感器
+            </Text>
+            <Text
+              style={{
+                color: theme.text,
+                fontSize: t.footnote,
+                lineHeight: leading.footnote,
+                marginTop: space.xs + 1,
+              }}
+              numberOfLines={2}
+            >
+              {health ? health.summary : '读取中'}
+            </Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text
+              style={{
+                color: theme.textTertiary,
+                fontSize: t.caption,
+                fontWeight: '700',
+                letterSpacing: 0.6,
+                textTransform: 'uppercase',
+              }}
+            >
+              姿态可信度
+            </Text>
+            <Text
+              style={{
+                color: confidence < LOW_CONFIDENCE ? theme.warning : theme.accent,
+                fontSize: t.footnote,
+                marginTop: space.xs + 1,
+              }}
+            >
+              {cue?.active ? `${Math.round(confidence * 100)}%` : '—'}
+            </Text>
+          </View>
+        </View>
       </Card>
+
+      {health?.degraded ? (
+        <Banner
+          tone="warning"
+          title="这台设备缺少陀螺仪或旋转矢量"
+          body={health.summary + '。转向提示会比预期迟钝，加速/刹车的上下流动仍正常。'}
+        />
+      ) : null}
+
+      {cue && cue.active && confidence < LOW_CONFIDENCE ? (
+        <Banner
+          tone="warning"
+          title="手机放法让方向判断不可靠"
+          body="把手机竖起来、屏幕朝向自己，或平放在腿上（屏幕朝上）。现在这个角度，左右提示可能不明显或反向。"
+        />
+      ) : null}
+
+      {error ? (
+        <Banner
+          tone="danger"
+          title="预览不可用"
+          body={error}
+          action={
+            <Tap
+              onPress={() => void start()}
+              accessibilityLabel="重试预览"
+              style={{
+                height: 40,
+                borderRadius: radius.control,
+                backgroundColor: theme.accentSoft,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text style={{ color: theme.accent, fontSize: t.control, fontWeight: '700' }}>
+                重试
+              </Text>
+            </Tap>
+          }
+        />
+      ) : null}
     </>
   );
 }

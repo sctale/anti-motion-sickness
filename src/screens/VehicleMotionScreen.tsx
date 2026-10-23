@@ -15,14 +15,14 @@ import {
   Card,
   Chevron,
   FadeIn,
+  Pill,
   Row,
   SectionLabel,
   Segmented,
-  StatusDot,
   Tap,
   Toggle,
 } from '../components/ui';
-import { radius, space, type as t, useIsDark, useTheme } from '../theme/tokens';
+import { radius, space, leading, type as t, useIsDark, useTheme } from '../theme/tokens';
 
 interface VehicleMotionScreenProps {
   onExit: () => void;
@@ -189,35 +189,40 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
           contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: space.xxl }}
           showsVerticalScrollIndicator={false}
         >
+          {/* 标题行右侧放状态胶囊：原来是一整张卡只说「圆点未显示」，
+              占一屏高度还和下面的预览舱抢焦点 */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.xs }}>
+            <Text
+              style={{
+                flex: 1,
+                color: theme.text,
+                fontSize: t.headline,
+                fontWeight: '800',
+                letterSpacing: -0.6,
+                lineHeight: leading.headline,
+              }}
+            >
+              防晕圆点
+            </Text>
+            <Pill tone={isRunning ? 'live' : 'neutral'} label={isRunning ? '显示中' : '未显示'} />
+          </View>
           <Text
             style={{
-              color: theme.text,
-              fontSize: t.title,
-              fontWeight: '800',
-              letterSpacing: -0.4,
-              marginTop: space.xs,
+              color: theme.textSecondary,
+              fontSize: t.footnote,
+              lineHeight: leading.footnote,
+              marginTop: space.sm,
               marginBottom: space.lg,
             }}
           >
-            防晕圆点
+            {!isSupported
+              ? '当前构建不包含悬浮窗能力（仅 Android 完整构建可用）'
+              : [
+                  settings.autoMode ? '自动模式' : '始终显示',
+                  '灵敏度 ' + SENSITIVITY_LABELS[toSensitivityLevel(settings.sensitivity)],
+                  isRunning ? '切到其他应用也不会中断' : '点「开始显示」后生效',
+                ].join(' · ')}
           </Text>
-
-          <Card>
-            <Row
-              first
-              title={isRunning ? '圆点正在显示' : '圆点未显示'}
-              detail={
-                !isSupported
-                  ? '当前构建不包含悬浮窗能力（仅 Android 完整构建可用）'
-                  : [
-                      settings.autoMode ? '自动模式' : '始终显示',
-                      '灵敏度 ' + SENSITIVITY_LABELS[toSensitivityLevel(settings.sensitivity)],
-                      isRunning ? '切到其他应用也不会中断' : '点「开始显示」后生效',
-                    ].join(' · ')
-              }
-              accessory={<StatusDot on={isRunning} size={12} />}
-            />
-          </Card>
 
           {isSupported ? <PreviewPanel /> : null}
 
@@ -305,7 +310,7 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
                 style={{
                   color: theme.textSecondary,
                   fontSize: t.footnote,
-                  lineHeight: 18,
+                  lineHeight: leading.footnote,
                   marginTop: space.md,
                 }}
               >
@@ -367,7 +372,7 @@ export const VehicleMotionScreen: React.FC<VehicleMotionScreenProps> = ({ onExit
             style={{
               color: theme.textTertiary,
               fontSize: t.footnote,
-              lineHeight: 19,
+              lineHeight: leading.footnote,
               marginTop: space.lg,
               paddingHorizontal: space.xs,
             }}

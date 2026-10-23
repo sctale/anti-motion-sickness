@@ -330,7 +330,7 @@ export function Segmented<T extends string>({
           <View
             style={{
               flex: 1,
-              backgroundColor: theme.accent,
+              backgroundColor: theme.button,
               borderRadius: radius.control - 3,
             }}
           />
@@ -380,9 +380,11 @@ export function Button({
   style?: StyleProp<ViewStyle>;
 }): React.JSX.Element {
   const theme = useThemeSafe();
+  // primary 用 button 而不是 accent：浅色主题下 accent 还要兼顾文字色，
+  // 明度压得比实色按钮底更高，直接拿来做底色会失去「这才是主操作」的重量
   const bg =
     variant === 'primary'
-      ? theme.accent
+      ? theme.button
       : variant === 'danger'
         ? theme.dangerSoft
         : theme.accentSoft;
@@ -391,7 +393,7 @@ export function Button({
       ? theme.accentText
       : variant === 'danger'
         ? theme.danger
-        : theme.onAccentSoft;
+        : theme.accent;
 
   return (
     <Tap
@@ -452,7 +454,7 @@ export function Banner({
 
   const map = useMemo(
     () => ({
-      info: { bg: theme.accentSoft, fg: theme.onAccentSoft },
+      info: { bg: theme.accentSoft, fg: theme.accent },
       warning: { bg: theme.warningSoft, fg: theme.warning },
       danger: { bg: theme.dangerSoft, fg: theme.danger },
       positive: { bg: theme.positiveSoft, fg: theme.positive },
@@ -518,6 +520,50 @@ export function StatusDot({ on, size = 10 }: { on: boolean; size?: number }): Re
           transform: [{ scale: on ? pulse.interpolate({ inputRange: [0, 1], outputRange: [0.86, 1] }) : 1 }],
         }}
       />
+    </View>
+  );
+}
+
+/** 状态胶囊：把「现在是什么状态」收进一颗小药丸，而不是散在行里的一段文字 */
+export function Pill({
+  tone = 'neutral',
+  label,
+}: {
+  tone?: 'neutral' | 'live' | 'warning';
+  label: string;
+}): React.JSX.Element {
+  const theme = useThemeSafe();
+  const map = {
+    neutral: { bg: theme.cardAlt, fg: theme.textSecondary },
+    live: { bg: theme.accentSoft, fg: theme.accent },
+    warning: { bg: theme.warningSoft, fg: theme.warning },
+  } as const;
+  const tone2 = map[tone];
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: tone2.bg,
+        borderRadius: radius.pill,
+        paddingHorizontal: space.md,
+        paddingVertical: 5,
+      }}
+    >
+      {tone === 'live' ? (
+        <View
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: 4,
+            backgroundColor: tone2.fg,
+            marginRight: space.sm - 1,
+          }}
+        />
+      ) : null}
+      <Text style={{ color: tone2.fg, fontSize: t.caption, fontWeight: '700' }}>
+        {label}
+      </Text>
     </View>
   );
 }

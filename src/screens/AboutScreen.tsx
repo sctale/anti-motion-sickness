@@ -3,7 +3,7 @@ import { Linking, ScrollView, Share, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'react-native';
 import { Banner, Card, Chevron, Row, SectionLabel, Tap } from '../components/ui';
-import { radius, space, type as t, useIsDark, useTheme } from '../theme/tokens';
+import { radius, space, leading, type as t, useIsDark, useTheme } from '../theme/tokens';
 import { BRAND, SUPPORT } from '../theme/brand';
 import { useStringPreference } from '../hooks/usePreference';
 import { LAST_CRASH_KEY } from '../utils/constants';
@@ -108,9 +108,10 @@ export const AboutScreen: React.FC<AboutScreenProps> = ({ onExit }) => {
           <Text
             style={{
               color: theme.text,
-              fontSize: t.title,
+              fontSize: t.headline,
               fontWeight: '800',
-              letterSpacing: -0.4,
+              letterSpacing: -0.6,
+              lineHeight: leading.headline,
               marginTop: space.xs,
               marginBottom: space.lg,
             }}
@@ -144,7 +145,7 @@ export const AboutScreen: React.FC<AboutScreenProps> = ({ onExit }) => {
                     style={{
                       color: theme.textSecondary,
                       fontSize: t.footnote,
-                      lineHeight: 20,
+                      lineHeight: leading.control,
                       paddingHorizontal: space.lg,
                       paddingBottom: space.lg,
                     }}
@@ -202,7 +203,7 @@ export const AboutScreen: React.FC<AboutScreenProps> = ({ onExit }) => {
             style={{
               color: theme.textTertiary,
               fontSize: t.footnote,
-              lineHeight: 19,
+              lineHeight: leading.footnote,
               marginTop: space.xl,
               paddingHorizontal: space.xs,
             }}

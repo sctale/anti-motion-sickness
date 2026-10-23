@@ -11,6 +11,7 @@ import { VehicleMotionScreen } from './src/screens/VehicleMotionScreen';
 import { CarDetectionScreen } from './src/screens/CarDetectionScreen';
 import { AboutScreen } from './src/screens/AboutScreen';
 import { OnboardingChecklist } from './src/components/OnboardingChecklist';
+import { DotMatrixMark } from './src/components/DotMatrixMark';
 import { BRAND } from './src/theme/brand';
 import {
   Banner,
@@ -18,11 +19,11 @@ import {
   Card,
   Chevron,
   FadeIn,
+  Pill,
   Row,
   SectionLabel,
-  StatusDot,
 } from './src/components/ui';
-import { space, type as t, useIsDark, useTheme } from './src/theme/tokens';
+import { leading, radius, space, type as t, useIsDark, useTheme } from './src/theme/tokens';
 
 // 必须早于任何可能抛错的代码：错误边界只接得住渲染期，effect/定时器/原生事件回调里的
 // 致命错误要走全局处理器，趁进程终止前把原因同步落盘。
@@ -105,22 +106,42 @@ function Home({ onOpen }: { onOpen: (s: Screen) => void }): React.JSX.Element {
           contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: space.xxl }}
           showsVerticalScrollIndicator={false}
         >
-          <Text
-            style={{
-              color: theme.text,
-              fontSize: 30,
-              fontWeight: '800',
-              letterSpacing: -0.6,
-              marginTop: space.xl,
-            }}
-          >
-            {BRAND.appName}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+            <View style={{ flex: 1 }}>
+              <Text
+                style={{
+                  color: theme.textTertiary,
+                  fontSize: t.caption,
+                  fontWeight: '700',
+                  letterSpacing: 1.2,
+                  textTransform: 'uppercase',
+                }}
+              >
+                Android · 后台常驻
+              </Text>
+              <Text
+                style={{
+                  color: theme.text,
+                  fontSize: t.display,
+                  fontWeight: '800',
+                  letterSpacing: -0.8,
+                  lineHeight: leading.display,
+                  marginTop: space.sm,
+                }}
+              >
+                {BRAND.appName}
+              </Text>
+            </View>
+            {/* 品牌位用和桌面图标同一套点阵母题：静态，不为了好看常驻开传感器 */}
+            <View style={{ marginTop: space.md }}>
+              <DotMatrixMark size={84} />
+            </View>
+          </View>
           <Text
             style={{
               color: theme.textSecondary,
               fontSize: t.control,
-              lineHeight: 21,
+              lineHeight: leading.control,
               marginTop: space.sm,
               marginBottom: space.xl,
             }}
@@ -154,37 +175,24 @@ function Home({ onOpen }: { onOpen: (s: Screen) => void }): React.JSX.Element {
               title={BRAND.featureName}
               detail="常驻后台运行，覆盖在其他应用之上；息屏自动暂停省电"
               accessory={
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  {isRunning ? (
-                    <>
-                      <StatusDot on size={9} />
-                      <Text
-                        style={{
-                          color: theme.positive,
-                          fontSize: t.footnote,
-                          fontWeight: '700',
-                          marginHorizontal: space.sm,
-                        }}
-                      >
-                        显示中
-                      </Text>
-                    </>
-                  ) : null}
-                  <Chevron direction="right" color={theme.textTertiary} />
-                </View>
+                isRunning ? (
+                  <Pill tone="live" label="显示中" />
+                ) : (
+                  <Chevron direction="right" color={theme.accent} />
+                )
               }
               onPress={() => onOpen('vehicleMotion')}
             />
             <Row
               title={BRAND.detectionName}
               detail="用加速度计判断是否正在乘车，检测期间按节奏震动提醒"
-              accessory={<Chevron direction="right" color={theme.textTertiary} />}
+              accessory={<Chevron direction="right" color={theme.accent} />}
               onPress={() => onOpen('carDetection')}
             />
             <Row
               title={BRAND.aboutName}
               detail="常见问题、反馈渠道，以及「数据只在本机处理」的说明"
-              accessory={<Chevron direction="right" color={theme.textTertiary} />}
+              accessory={<Chevron direction="right" color={theme.accent} />}
               onPress={() => onOpen('about')}
             />
           </Card>
@@ -221,7 +229,7 @@ function CrashReportCard(): React.JSX.Element | null {
     <View
       style={{
         backgroundColor: theme.dangerSoft,
-        borderRadius: 16,
+        borderRadius: radius.card,
         padding: space.lg,
         marginBottom: space.md,
       }}
@@ -233,7 +241,7 @@ function CrashReportCard(): React.JSX.Element | null {
         style={{
           maxHeight: 150,
           backgroundColor: theme.cardAlt,
-          borderRadius: 10,
+          borderRadius: radius.control,
           padding: space.md,
           marginTop: space.sm,
         }}
@@ -242,8 +250,8 @@ function CrashReportCard(): React.JSX.Element | null {
         <Text
           style={{
             color: theme.textSecondary,
-            fontSize: 11,
-            lineHeight: 17,
+            fontSize: t.caption,
+            lineHeight: leading.caption,
             fontFamily: 'monospace',
           }}
         >
@@ -254,7 +262,7 @@ function CrashReportCard(): React.JSX.Element | null {
         style={{
           color: theme.textSecondary,
           fontSize: t.footnote,
-          lineHeight: 19,
+          lineHeight: leading.footnote,
           marginTop: space.sm,
         }}
       >

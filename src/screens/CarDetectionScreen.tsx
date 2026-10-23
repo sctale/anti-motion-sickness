@@ -20,7 +20,7 @@ import {
   Tap,
   Toggle,
 } from '../components/ui';
-import { radius, space, type as t, useIsDark, useTheme } from '../theme/tokens';
+import { radius, space, leading, type as t, useIsDark, useTheme } from '../theme/tokens';
 
 interface CarDetectionScreenProps {
   onExit: () => void;
@@ -175,9 +175,10 @@ export const CarDetectionScreen: React.FC<CarDetectionScreenProps> = ({ onExit }
           <Text
             style={{
               color: theme.text,
-              fontSize: t.title,
+              fontSize: t.headline,
               fontWeight: '800',
-              letterSpacing: -0.4,
+              letterSpacing: -0.6,
+              lineHeight: leading.headline,
               marginTop: space.xs,
               marginBottom: space.lg,
             }}
@@ -277,7 +278,7 @@ export const CarDetectionScreen: React.FC<CarDetectionScreenProps> = ({ onExit }
             style={{
               color: theme.textTertiary,
               fontSize: t.footnote,
-              lineHeight: 19,
+              lineHeight: leading.footnote,
               marginTop: space.lg,
               paddingHorizontal: space.xs,
             }}
