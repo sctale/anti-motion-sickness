@@ -23,7 +23,7 @@
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
       ],
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0A272E",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -38,11 +38,11 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#F2EFE6",
+          "backgroundColor": "#F6F7F9",
           "image": "./assets/splash-icon.png",
-          "imageWidth": 340,
+          "imageWidth": 320,
           "dark": {
-            "backgroundColor": "#F2EFE6",
+            "backgroundColor": "#0B0F13",
             "image": "./assets/splash-icon.png"
           }
         }

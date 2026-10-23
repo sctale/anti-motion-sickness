@@ -84,3 +84,43 @@ if (Math.abs(Number(markTrail[1]) - trail) > 0.001) {
 }
 
 console.log(`✓ 点阵母题一致：${PAIRS.length} 项几何 + 后缘亮度 ${trail}`);
+
+/* ---------- 另一类漂移：图标换了，app.json 里的底色还留着上一版的颜色 ----------
+   上一轮把桌面图标从「暖白纸面」换成深色点阵舱，但 splash 的 backgroundColor
+   仍是纸色 #F2EFE6 —— 冷启动就是一张暖纸托着青黑图标，两套语言同时出现。
+   不变式：启动屏底色 = 首页 page 色；自适应图标兜底色必须来自母题场底。 */
+const APP = JSON.parse(fs.readFileSync(path.join(ROOT, 'app.json'), 'utf8')).expo;
+const tokensSrc = fs.readFileSync(path.join(ROOT, 'src/theme/tokens.ts'), 'utf8');
+const pageOf = (theme) => {
+  const block = tokensSrc.match(new RegExp(`  ${theme}: \\{([\\s\\S]*?)\\n  \\},`));
+  const m = block && block[1].match(/^\s*page:\s*'(#[0-9A-Fa-f]{6})'/m);
+  return m ? m[1].toUpperCase() : null;
+};
+const splash = (APP.plugins || []).find((p) => Array.isArray(p) && p[0] === 'expo-splash-screen');
+const cfg = splash && splash[1];
+const fieldStops = (markSrc.match(/'#0[0-9A-Fa-f]{5}'|'#1[0-9A-Fa-f]{5}'/g) || []).map((s) => s.replace(/'/g, '').toUpperCase());
+const colorProblems = [];
+
+for (const [label, got, want] of [
+  ['splash 浅色底', cfg && cfg.backgroundColor, pageOf('light')],
+  ['splash 深色底', cfg && cfg.dark && cfg.dark.backgroundColor, pageOf('dark')],
+]) {
+  if (!want) colorProblems.push(`${label}：读不到 tokens 里的 page 色`);
+  else if (!got) colorProblems.push(`${label}：app.json 里没配`);
+  else if (got.toUpperCase() !== want) colorProblems.push(`${label}：app.json=${got} 但 tokens page=${want}（启动屏会和首页跳色）`);
+}
+
+const adaptive = APP.android && APP.android.adaptiveIcon;
+if (adaptive && adaptive.backgroundImage && fieldStops.length) {
+  const c = String(adaptive.backgroundColor || '').toUpperCase();
+  if (!fieldStops.includes(c)) {
+    colorProblems.push(`adaptiveIcon.backgroundColor=${adaptive.backgroundColor} 不在母题场底色里（${fieldStops.join(' / ')}）`);
+  }
+}
+
+if (colorProblems.length) {
+  console.error('✗ 外壳配色漂移：');
+  for (const p of colorProblems) console.error('  · ' + p);
+  process.exit(1);
+}
+console.log('✓ 启动屏底色 = 首页 page 色，自适应图标兜底色来自母题场底');
